@@ -1,31 +1,25 @@
 """
 Jigsaw Backend — Flask server for PCB component analysis.
-Uses Gemini API with function calling for hierarchical component selection.
+Uses a 3-agent LangChain pipeline with LangSmith tracing.
 """
 
 import json
+import logging
 import os
 import uuid
 from flask import Flask, request, jsonify, Response, stream_with_context
 from flask_cors import CORS
 from dotenv import load_dotenv
-from google import genai
-from gemini_client import stream_component_analysis, get_chat_response
+from pipeline import stream_component_analysis, get_chat_response
 
 load_dotenv()
+
+logging.basicConfig(level=logging.INFO)
 
 app = Flask(__name__)
 CORS(app)
 
-# Configuration
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-MODEL = os.getenv("MODEL", "gemini-3.1-flash-lite-preview")
 PORT = int(os.getenv("PORT", "3001"))
-
-if not GEMINI_API_KEY:
-    raise ValueError("GEMINI_API_KEY environment variable is required")
-
-client = genai.Client(api_key=GEMINI_API_KEY)
 
 # In-memory conversation state: {queryId: {query, messages, status}}
 query_state: dict[str, dict] = {}
@@ -55,7 +49,7 @@ def mcp_query():
     query_id = f"query_{uuid.uuid4().hex[:12]}"
 
     try:
-        response_text = get_chat_response(query, MODEL, client)
+        response_text = get_chat_response(query)
 
         query_state[query_id] = {
             "query": query,
@@ -91,7 +85,7 @@ def mcp_continue():
     state = query_state[query_id]
 
     try:
-        response_text = get_chat_response(context, MODEL, client, state["messages"])
+        response_text = get_chat_response(context, state["messages"])
 
         state["messages"].append({"role": "user", "content": context})
         state["messages"].append({"role": "assistant", "content": response_text})
@@ -117,7 +111,7 @@ def mcp_component_analysis():
 
     def generate():
         try:
-            for event in stream_component_analysis(query, MODEL, client, context):
+            for event in stream_component_analysis(query, context):
                 yield f"data: {json.dumps(event)}\n\n"
         except Exception as e:
             app.logger.error(f"Streaming error: {e}")

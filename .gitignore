@@ -5,6 +5,7 @@
 # Claude / Cursor local settings
 .claude/
 .cursor/
+CLAUDE.md
 
 # OS
 .DS_Store

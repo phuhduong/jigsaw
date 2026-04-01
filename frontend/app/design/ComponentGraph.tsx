@@ -133,6 +133,10 @@ export default function ComponentGraph({
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
 
+    // Capture the base offset ONCE at query start — for the first query this is 0,
+    // for appended queries it offsets from the previous query's max hierarchy.
+    const queryBaseOffset = localHighestHierarchyRef.current >= 0 ? localHighestHierarchyRef.current + 1 : 0;
+
     const handleUpdate = (update: ComponentAnalysisResponse) => {
       if (update.type === "reasoning" && update.componentId) {
         setComponents((prev: Map<string, ComponentNode>) => {
@@ -142,10 +146,9 @@ export default function ComponentGraph({
           }
 
           const newMap = new Map(prev);
-          
-          const baseOffset = localHighestHierarchyRef.current >= 0 ? localHighestHierarchyRef.current + 1 : 0;
-          const adjustedHierarchy = (update.hierarchyLevel || 0) + baseOffset;
-          
+
+          const adjustedHierarchy = (update.hierarchyLevel || 0) + queryBaseOffset;
+
           const base = existing || {
             id: update.componentId!,
             label: update.componentName || update.componentId || "Component",
@@ -167,20 +170,17 @@ export default function ComponentGraph({
       } else if (update.type === "selection" && update.componentId) {
         setComponents((prev: Map<string, ComponentNode>) => {
           const newMap = new Map(prev);
-          
-          // Calculate hierarchy offset for appending new components
-          // Use the current highest hierarchy + 1 as the base offset
-          const baseOffset = localHighestHierarchyRef.current >= 0 ? localHighestHierarchyRef.current + 1 : 0;
-          const adjustedHierarchy = (update.hierarchyLevel || 0) + baseOffset;
-          
-          // Update highest hierarchy
+
+          const adjustedHierarchy = (update.hierarchyLevel || 0) + queryBaseOffset;
+
+          // Update highest hierarchy for future query offsets
           if (adjustedHierarchy > localHighestHierarchyRef.current) {
             localHighestHierarchyRef.current = adjustedHierarchy;
             if (onSetHighestHierarchy) {
               onSetHighestHierarchy(adjustedHierarchy);
             }
           }
-          
+
           const existing = newMap.get(update.componentId!) || {
             id: update.componentId!,
             label: update.componentName || update.componentId || "Component",
@@ -201,12 +201,11 @@ export default function ComponentGraph({
 
           // Notify parent of selection with hierarchy offset
           if (onComponentSelected && update.partData) {
-            const baseOffset = localHighestHierarchyRef.current >= 0 ? localHighestHierarchyRef.current + 1 : 0;
             onComponentSelected(
               update.componentId!,
               update.partData,
               update.position,
-              baseOffset
+              queryBaseOffset
             );
           }
 
@@ -371,7 +370,7 @@ export default function ComponentGraph({
                           {node.label}
                         </span>
                         <StatusIcon status={node.status} />
-                        {node.hierarchyLevel > 0 && (
+                        {node.hierarchyLevel >= 0 && (
                           <Badge
                             variant="outline"
                             className="text-xs border-zinc-700 text-zinc-400">
