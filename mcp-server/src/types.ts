@@ -19,15 +19,6 @@ export interface PartObject {
 }
 
 /**
- * Arguments for search_components tool
- */
-export interface SearchComponentsArgs {
-  query: string;
-  limit?: number;
-  category?: string;
-}
-
-/**
  * DigiKey OAuth2 token response
  */
 export interface DigiKeyTokenResponse {

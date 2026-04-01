@@ -20,7 +20,6 @@ export function registerDigiKeyTools(server: McpServer, digikeyClient: DigiKeyCl
         'Search query describing the component needed (e.g., "ESP32 microcontroller with WiFi", "3.3V LDO regulator 600mA")'
       ),
       limit: z.number().optional().default(5).describe('Maximum number of results to return (default: 5)'),
-      category: z.string().optional().describe('Optional component category to narrow results (e.g., "Microcontrollers", "Voltage Regulators")'),
     },
     async ({ query, limit = 5 }) => {
       // Use the query as-is — the caller (Agent 1) crafts descriptive search queries.

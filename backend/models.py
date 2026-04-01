@@ -27,25 +27,23 @@ class ComponentConstraint(BaseModel):
     component_id: Literal["mcu", "power", "sensor", "memory", "antenna", "connector", "other"] = Field(description="Component category")
     component_name: str = Field(description="Human-readable name, e.g. 'Microcontroller', 'Power Management'")
     hierarchy_level: int = Field(description="Dependency order: 0=MCU, 1=Power/Sensor, 2=Memory/Antenna, 3=Passive/Connector")
-
-    @field_validator("hierarchy_level", mode="before")
-    @classmethod
-    def clamp_hierarchy(cls, v: Any, info) -> int:
-        """Force hierarchy_level to the canonical value based on component_id."""
-        # If component_id is already set in the data, use the canonical mapping
-        data = info.data
-        if "component_id" in data and data["component_id"] in HIERARCHY_MAP:
-            return HIERARCHY_MAP[data["component_id"]]
-        # Otherwise clamp to 0-3
-        if isinstance(v, int):
-            return max(0, min(3, v))
-        return 3
     description: str = Field(description="What the user needs from this component")
     voltage: str | None = Field(default=None, description="Operating voltage requirement, e.g. '3.3V'")
     interfaces: list[str] = Field(default_factory=list, description="Required interfaces, e.g. ['I2C', 'SPI']")
     package: str | None = Field(default=None, description="Package type preference, e.g. 'QFN', 'SOT-23'")
     notes: str | None = Field(default=None, description="Any additional specs: current rating, frequency, temperature range, etc.")
     search_query: str = Field(description="Suggested DigiKey search string for this component")
+
+    @field_validator("hierarchy_level", mode="before")
+    @classmethod
+    def clamp_hierarchy(cls, v: Any, info) -> int:
+        """Force hierarchy_level to the canonical value based on component_id."""
+        data = info.data
+        if "component_id" in data and data["component_id"] in HIERARCHY_MAP:
+            return HIERARCHY_MAP[data["component_id"]]
+        if isinstance(v, int):
+            return max(0, min(3, v))
+        return 3
 
 
 class ParsedRequirements(BaseModel):

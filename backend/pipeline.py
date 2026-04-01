@@ -1,6 +1,5 @@
 """
 Pipeline orchestrator — wires the 3-agent pipeline and yields SSE events.
-Replaces gemini_client.py.
 """
 
 from __future__ import annotations
@@ -40,7 +39,6 @@ def stream_component_analysis(
 ) -> Generator[dict[str, Any], None, None]:
     """
     Run the 3-agent pipeline and yield SSE-compatible event dicts.
-    Drop-in replacement for gemini_client.stream_component_analysis.
 
     hierarchyLevel is set from the canonical HIERARCHY_MAP:
     0=MCU, 1=Power/Sensor, 2=Memory/Antenna, 3=Connector.
@@ -67,9 +65,6 @@ def stream_component_analysis(
             rt.end()
             rt.post()
             return
-
-        # Build a name lookup for use throughout the pipeline
-        constraint_map = {c.component_id: c for c in requirements.components}
 
         # --- Agent 2: Retrieve Components (one at a time, yielding events) ---
         retrieved: list[RetrievedComponent] = []
@@ -117,8 +112,6 @@ def stream_component_analysis(
         retrieval = RetrievalResult(components=retrieved, failures=failures)
 
         # --- Agent 3: Validate + Retry Loop ---
-        approved_ids: set[str] = set()
-
         for attempt in range(MAX_RETRIES + 1):
             try:
                 validation = validate_components(requirements, retrieval, llm)
@@ -127,11 +120,6 @@ def stream_component_analysis(
                 rt.end(error=str(e))
                 rt.post()
                 return
-
-            # Lock in approved components
-            for verdict in validation.verdicts:
-                if verdict.status == "approved" and verdict.component_id not in approved_ids:
-                    approved_ids.add(verdict.component_id)
 
             if not validation.retry_component_ids or attempt == MAX_RETRIES:
                 break

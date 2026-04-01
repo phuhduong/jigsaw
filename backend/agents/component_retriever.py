@@ -12,8 +12,6 @@ from langsmith import traceable
 from models import (
     ComponentConstraint,
     ComponentPick,
-    ParsedRequirements,
-    RetrievalResult,
     RetrievedComponent,
 )
 from tools import search_components
@@ -69,10 +67,10 @@ def _retrieve_one(
 
     for query, query_specs in queries_to_try:
         logger.info(
-            "Searching for %s: query=%r, category=%r, specs=%r",
-            constraint.component_name, query, constraint.component_id, query_specs,
+            "Searching for %s: query=%r, specs=%r",
+            constraint.component_name, query, query_specs,
         )
-        results = search_components(query, constraint.component_id, query_specs)
+        results = search_components(query, query_specs)
         logger.info(
             "Search returned %d results for %s",
             len(results) if results else 0, constraint.component_name,
@@ -160,21 +158,3 @@ def _llm_pick(
 
     # Fallback: pick first result. Agent 3 is the quality gate.
     return 0
-
-
-@traceable(name="Agent2_ComponentRetriever")
-def retrieve_components(
-    requirements: ParsedRequirements,
-    llm: ChatGoogleGenerativeAI,
-) -> RetrievalResult:
-    """Retrieve components for all constraints, in hierarchy order."""
-    result = RetrievalResult()
-
-    for constraint in sorted(requirements.components, key=lambda c: c.hierarchy_level):
-        retrieved = _retrieve_one(constraint, llm)
-        if retrieved:
-            result.components.append(retrieved)
-        else:
-            result.failures.append(constraint.component_id)
-
-    return result

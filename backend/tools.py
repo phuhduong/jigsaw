@@ -1,6 +1,5 @@
 """
-Component search tool definition.
-Calls the DigiKey MCP server via HTTP for real component data.
+Component search via the DigiKey MCP server.
 """
 
 import os
@@ -8,40 +7,6 @@ import json
 import requests
 
 MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://localhost:8080")
-
-# Tool schema for Gemini function calling
-SEARCH_COMPONENTS_TOOL = {
-    "name": "search_components",
-    "description": (
-        "Search for electronic components by specification. Returns a list of compatible parts "
-        "matching the given requirements. Use this to find specific components like microcontrollers, "
-        "sensors, power regulators, connectors, passives, etc."
-    ),
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "query": {
-                "type": "string",
-                "description": "Search query for the component (e.g. 'ESP32 WiFi Bluetooth microcontroller 3.3V')",
-            },
-            "category": {
-                "type": "string",
-                "description": "Component category: mcu, power, sensor, memory, antenna, connector, passive, or other",
-                "enum": ["mcu", "power", "sensor", "memory", "antenna", "connector", "passive", "other"],
-            },
-            "specifications": {
-                "type": "object",
-                "description": "Key specifications to match",
-                "properties": {
-                    "voltage": {"type": "string", "description": "Operating voltage range"},
-                    "interface": {"type": "string", "description": "Communication interface (I2C, SPI, UART, etc.)"},
-                    "package": {"type": "string", "description": "Package type (SOT-23, QFN, etc.)"},
-                },
-            },
-        },
-        "required": ["query", "category"],
-    },
-}
 
 # MCP session ID cached for reuse across calls
 _mcp_session_id: str | None = None
@@ -165,14 +130,11 @@ def _do_search(search_query: str) -> list[dict]:
     return _parse_mcp_response(resp)
 
 
-def search_components(query: str, category: str, specifications: dict | None = None) -> list[dict]:
+def search_components(query: str, specifications: dict | None = None) -> list[dict]:
     """
     Search for components by calling the DigiKey MCP server.
     Retries once with a fresh session on failure.
-    Falls back to an error message if the MCP server is unreachable.
     """
-    # Build the search query — append specs for better results
-    # NOTE: Do NOT prepend category here — the MCP server already prepends it.
     search_query = query
     if specifications:
         spec_parts = [f"{v}" for v in specifications.values() if v]
@@ -197,5 +159,4 @@ def search_components(query: str, category: str, specifications: dict | None = N
                         "quantity": 0,
                     }
                 ]
-
     return []
