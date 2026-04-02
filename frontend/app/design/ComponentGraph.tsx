@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, forwardRef, useImperativeHandle } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
   Cpu,
@@ -12,7 +12,11 @@ import { Badge } from "../components/ui/badge";
 import {
   componentAnalysisApi,
   type ComponentAnalysisResponse,
-} from "../services/mcp";
+} from "../services/api";
+
+export interface ComponentGraphRef {
+  processRefinementEvent: (update: ComponentAnalysisResponse) => void;
+}
 
 interface ComponentGraphProps {
   onComponentSelected?: (componentId: string, partData: any, position?: { x: number; y: number }, hierarchyOffset?: number) => void;
@@ -22,7 +26,7 @@ interface ComponentGraphProps {
   onReset?: () => void; // Callback to reset components when new query starts
   onGetHighestHierarchy?: () => number; // Get current highest hierarchy level
   onSetHighestHierarchy?: (level: number) => void; // Set new highest hierarchy level
-  onContextRequested?: (queryId: string, message: string) => void; // Callback when MCP requests context during analysis
+  onContextRequested?: (queryId: string, message: string) => void;
   onContextProvided?: (context: string, queryId: string) => void; // Callback to provide context and resume analysis
   contextQueryId?: string; // Current context query ID if waiting for context
 }
@@ -36,7 +40,7 @@ interface ComponentNode {
   partData?: any;
 }
 
-export default function ComponentGraph({
+const ComponentGraph = forwardRef<ComponentGraphRef, ComponentGraphProps>(function ComponentGraph({
   onComponentSelected,
   analysisQuery,
   isAnalyzing = false,
@@ -47,7 +51,7 @@ export default function ComponentGraph({
   onContextRequested,
   onContextProvided,
   contextQueryId,
-}: ComponentGraphProps) {
+}, ref) {
   const [components, setComponents] = useState<Map<string, ComponentNode>>(
     new Map()
   );
@@ -58,6 +62,62 @@ export default function ComponentGraph({
   const localHighestHierarchyRef = useRef<number>(-1); // Track highest hierarchy in this component
   const pausedForContextRef = useRef<boolean>(false); // Track if paused for context
   const contextQueryIdRef = useRef<string | null>(null); // Track context query ID
+
+  // Expose method for parent to push refinement events into internal state
+  useImperativeHandle(ref, () => ({
+    processRefinementEvent(update: ComponentAnalysisResponse) {
+      if (update.type === "selection" && update.componentId) {
+        setComponents((prev) => {
+          const newMap = new Map(prev);
+          const existing = newMap.get(update.componentId!);
+          newMap.set(update.componentId!, {
+            id: update.componentId!,
+            label: update.componentName || update.componentId || "Component",
+            status: "selected",
+            reasoning: existing?.reasoning || [],
+            hierarchyLevel: existing?.hierarchyLevel ?? (update.hierarchyLevel || 0),
+            partData: update.partData,
+          });
+          return newMap;
+        });
+      } else if (update.type === "remove" && update.componentId) {
+        setComponents((prev) => {
+          const newMap = new Map(prev);
+          newMap.delete(update.componentId!);
+          return newMap;
+        });
+      } else if (update.type === "complete") {
+        // Refinement done — remove the temporary "system" reasoning node
+        setComponents((prev) => {
+          const newMap = new Map(prev);
+          newMap.delete("system");
+          return newMap;
+        });
+      } else if (update.type === "reasoning" && update.componentId) {
+        setComponents((prev) => {
+          const existing = prev.get(update.componentId!);
+          if (existing && (existing.status === "selected" || existing.status === "validated")) {
+            // Don't downgrade a selected component to reasoning during refinement
+            return prev;
+          }
+          const newMap = new Map(prev);
+          const base = existing || {
+            id: update.componentId!,
+            label: update.componentName || update.componentId || "Component",
+            status: "reasoning" as const,
+            reasoning: [],
+            hierarchyLevel: update.hierarchyLevel || 0,
+          };
+          newMap.set(update.componentId!, {
+            ...base,
+            status: "reasoning",
+            reasoning: [...base.reasoning, update.reasoning || ""],
+          });
+          return newMap;
+        });
+      }
+    },
+  }));
 
   // Handle context provided - resume analysis
   useEffect(() => {
@@ -209,6 +269,12 @@ export default function ComponentGraph({
             );
           }
 
+          return newMap;
+        });
+      } else if (update.type === "remove" && update.componentId) {
+        setComponents((prev: Map<string, ComponentNode>) => {
+          const newMap = new Map(prev);
+          newMap.delete(update.componentId!);
           return newMap;
         });
       } else if (update.type === "complete") {
@@ -483,4 +549,6 @@ export default function ComponentGraph({
       )}
     </div>
   );
-}
+});
+
+export default ComponentGraph;

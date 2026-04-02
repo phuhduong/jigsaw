@@ -1,10 +1,10 @@
 {
-  "name": "nexar-mcp-server",
+  "name": "digikey-mcp-server",
   "version": "0.1.0",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
-    "nexar-mcp": "dist/index.js"
+    "digikey-mcp": "dist/index.js"
   },
   "files": [
     "dist"

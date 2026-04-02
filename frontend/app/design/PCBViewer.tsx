@@ -3,7 +3,7 @@ import type React from "react";
 import { motion } from "motion/react";
 import { ZoomIn, ZoomOut, Maximize2 } from "lucide-react";
 import { Button } from "../components/ui/button";
-import type { PartObject } from "../services/mcp";
+import type { PartObject } from "../services/api";
 
 interface PCBComponent {
   id: string;

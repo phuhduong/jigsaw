@@ -1,7 +1,7 @@
 import { mockComponents, MOCK_CONFIG } from "./mockData";
 import type { ComponentAnalysisResponse } from "./componentAnalysisApi";
 import type { ComponentAnalysisConfig } from "./componentAnalysisApi";
-import type { MCPQueryRequest, MCPQueryResponse, MCPContinueRequest, MCPContinueResponse, MCPApiConfig } from "./mcpApi";
+import type { ChatQueryRequest, ChatQueryResponse, ChatContinueRequest, ChatContinueResponse, ChatApiConfig } from "./chatApi";
 
 // ---- Shared helpers ----
 
@@ -109,15 +109,15 @@ export async function mockStartAnalysis(
   });
 }
 
-// ---- Mock MCP chat ----
+// ---- Mock chat ----
 
 let mockQueryIdCounter = 0;
 export const mockActiveQueries = new Map<string, { query: string; timestamp: number }>();
 
 export async function mockQuery(
-  request: MCPQueryRequest,
-  config: MCPApiConfig
-): Promise<MCPQueryResponse> {
+  request: ChatQueryRequest,
+  config: ChatApiConfig
+): Promise<ChatQueryResponse> {
   await new Promise((resolve) => setTimeout(resolve, 9000 + Math.random() * 11000));
 
   const queryId = `query_${++mockQueryIdCounter}_${Date.now()}`;
@@ -139,9 +139,9 @@ export async function mockQuery(
 }
 
 export async function mockContinue(
-  request: MCPContinueRequest,
-  config: MCPApiConfig
-): Promise<MCPContinueResponse> {
+  request: ChatContinueRequest,
+  config: ChatApiConfig
+): Promise<ChatContinueResponse> {
   await new Promise((resolve) => setTimeout(resolve, 9000 + Math.random() * 11000));
 
   const queryData = mockActiveQueries.get(request.queryId);

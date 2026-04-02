@@ -12,9 +12,9 @@ export const API_CONFIG = {
     const envVal = getEnv("VITE_USE_MOCK");
     if (envVal !== undefined) return envVal === "true";
     // Default to mock if no backend URL is configured
-    return !getEnv("VITE_MCP_SERVER_URL");
+    return !getEnv("VITE_BACKEND_URL");
   },
   get baseUrl(): string {
-    return getEnv("VITE_MCP_SERVER_URL") || "http://localhost:3001";
+    return getEnv("VITE_BACKEND_URL") || "http://localhost:3001";
   },
 };

@@ -7,7 +7,7 @@ export function meta({}: Route.MetaArgs) {
     {
       name: "description",
       content:
-        "Describe your circuit board in plain language, and our AI designs it, finds compatible components, and generates a complete buy list - ready for MCP automation via Dedalus.",
+        "Describe your circuit board in plain language, and our AI finds compatible components and generates a complete buy list.",
     },
   ];
 }

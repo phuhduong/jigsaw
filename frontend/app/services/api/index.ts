@@ -1,11 +1,11 @@
-export { mcpApi, MCPApiService } from "./mcpApi";
+export { chatApi, ChatApiService } from "./chatApi";
 export type {
-  MCPQueryRequest,
-  MCPQueryResponse,
-  MCPContinueRequest,
-  MCPContinueResponse,
-  MCPApiConfig,
-} from "./mcpApi";
+  ChatQueryRequest,
+  ChatQueryResponse,
+  ChatContinueRequest,
+  ChatContinueResponse,
+  ChatApiConfig,
+} from "./chatApi";
 
 export {
   componentAnalysisApi,

@@ -1,11 +1,11 @@
 import { API_CONFIG } from "./config";
 import { mockQuery, mockContinue } from "./mockImplementations";
 
-export interface MCPQueryRequest {
+export interface ChatQueryRequest {
   query: string;
 }
 
-export interface MCPQueryResponse {
+export interface ChatQueryResponse {
   type: "response" | "context_request";
   queryId?: string;
   requestId?: string;
@@ -13,12 +13,12 @@ export interface MCPQueryResponse {
   response?: string;
 }
 
-export interface MCPContinueRequest {
+export interface ChatContinueRequest {
   context: string;
   queryId: string;
 }
 
-export interface MCPContinueResponse {
+export interface ChatContinueResponse {
   type: "response" | "context_request";
   queryId?: string;
   requestId?: string;
@@ -26,25 +26,25 @@ export interface MCPContinueResponse {
   response?: string;
 }
 
-export interface MCPApiConfig {
+export interface ChatApiConfig {
   baseUrl: string;
   queryEndpoint: string;
   continueEndpoint: string;
   timeout?: number;
 }
 
-const defaultConfig: MCPApiConfig = {
+const defaultConfig: ChatApiConfig = {
   baseUrl: "http://localhost:3001",
-  queryEndpoint: "/mcp/query",
-  continueEndpoint: "/mcp/continue",
+  queryEndpoint: "/api/query",
+  continueEndpoint: "/api/continue",
   timeout: 30000,
 };
 
 async function realQuery(
-  request: MCPQueryRequest,
-  config: MCPApiConfig,
+  request: ChatQueryRequest,
+  config: ChatApiConfig,
   signal?: AbortSignal
-): Promise<MCPQueryResponse> {
+): Promise<ChatQueryResponse> {
   const controller = signal ? undefined : new AbortController();
   const abortSignal = signal || controller?.signal;
   const timeoutId = config.timeout ? setTimeout(() => controller?.abort(), config.timeout) : null;
@@ -76,10 +76,10 @@ async function realQuery(
 }
 
 async function realContinue(
-  request: MCPContinueRequest,
-  config: MCPApiConfig,
+  request: ChatContinueRequest,
+  config: ChatApiConfig,
   signal?: AbortSignal
-): Promise<MCPContinueResponse> {
+): Promise<ChatContinueResponse> {
   const controller = signal ? undefined : new AbortController();
   const abortSignal = signal || controller?.signal;
   const timeoutId = config.timeout ? setTimeout(() => controller?.abort(), config.timeout) : null;
@@ -110,17 +110,17 @@ async function realContinue(
   }
 }
 
-class MCPApiService {
-  private config: MCPApiConfig;
+class ChatApiService {
+  private config: ChatApiConfig;
   private useMock: boolean;
 
-  constructor(config?: Partial<MCPApiConfig>, useMock: boolean = false) {
+  constructor(config?: Partial<ChatApiConfig>, useMock: boolean = false) {
     this.config = { ...defaultConfig, ...config };
     this.useMock = useMock;
   }
 
-  async sendQuery(query: string, signal?: AbortSignal): Promise<MCPQueryResponse> {
-    const request: MCPQueryRequest = { query };
+  async sendQuery(query: string, signal?: AbortSignal): Promise<ChatQueryResponse> {
+    const request: ChatQueryRequest = { query };
     return this.useMock ? mockQuery(request, this.config) : realQuery(request, this.config, signal);
   }
 
@@ -128,14 +128,14 @@ class MCPApiService {
     context: string,
     queryId: string,
     signal?: AbortSignal
-  ): Promise<MCPContinueResponse> {
-    const request: MCPContinueRequest = { context, queryId };
+  ): Promise<ChatContinueResponse> {
+    const request: ChatContinueRequest = { context, queryId };
     return this.useMock
       ? mockContinue(request, this.config)
       : realContinue(request, this.config, signal);
   }
 
-  updateConfig(config: Partial<MCPApiConfig>) {
+  updateConfig(config: Partial<ChatApiConfig>) {
     this.config = { ...this.config, ...config };
   }
 
@@ -144,9 +144,9 @@ class MCPApiService {
   }
 }
 
-export const mcpApi = new MCPApiService(
+export const chatApi = new ChatApiService(
   { baseUrl: API_CONFIG.baseUrl },
   API_CONFIG.useMock
 );
 
-export { MCPApiService };
+export { ChatApiService };

@@ -93,3 +93,12 @@ class ValidationResult(BaseModel):
 
     verdicts: list[ValidationVerdict] = Field(default_factory=list)
     retry_component_ids: list[str] = Field(default_factory=list, description="component_ids that need re-search; empty means all approved")
+
+
+class RefinementPlan(BaseModel):
+    """LLM output: what to change based on the user's modification request."""
+
+    components_to_replace: list[ComponentConstraint] = Field(default_factory=list, description="Components to re-search with updated constraints")
+    components_to_add: list[ComponentConstraint] = Field(default_factory=list, description="New components to add")
+    components_to_remove: list[str] = Field(default_factory=list, description="component_ids to remove from the design")
+    reasoning: str = Field(description="Brief explanation of what changes are being made and why")

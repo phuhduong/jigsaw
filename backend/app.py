@@ -10,7 +10,7 @@ import uuid
 from flask import Flask, request, jsonify, Response, stream_with_context
 from flask_cors import CORS
 from dotenv import load_dotenv
-from pipeline import stream_component_analysis, get_chat_response
+from pipeline import stream_component_analysis, stream_refinement, get_chat_response
 
 load_dotenv()
 
@@ -38,7 +38,7 @@ def _detect_context_request(text: str) -> bool:
     return has_question and (matches_pattern or short_response)
 
 
-@app.route("/mcp/query", methods=["POST"])
+@app.route("/api/query", methods=["POST"])
 def mcp_query():
     """Handle initial chat query."""
     data = request.get_json()
@@ -65,11 +65,11 @@ def mcp_query():
         return jsonify({"type": "response", "message": response_text}), 200
 
     except Exception as e:
-        app.logger.error(f"Error in /mcp/query: {e}")
+        app.logger.error(f"Error in /api/query: {e}")
         return jsonify({"error": str(e)}), 500
 
 
-@app.route("/mcp/continue", methods=["POST"])
+@app.route("/api/continue", methods=["POST"])
 def mcp_continue():
     """Continue conversation with additional context."""
     data = request.get_json()
@@ -95,11 +95,11 @@ def mcp_continue():
         return jsonify({"type": "response", "message": response_text}), 200
 
     except Exception as e:
-        app.logger.error(f"Error in /mcp/continue: {e}")
+        app.logger.error(f"Error in /api/continue: {e}")
         return jsonify({"error": str(e)}), 500
 
 
-@app.route("/mcp/component-analysis", methods=["POST"])
+@app.route("/api/component-analysis", methods=["POST"])
 def mcp_component_analysis():
     """Stream component analysis via Server-Sent Events."""
     data = request.get_json()
@@ -115,6 +115,36 @@ def mcp_component_analysis():
                 yield f"data: {json.dumps(event)}\n\n"
         except Exception as e:
             app.logger.error(f"Streaming error: {e}")
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@app.route("/api/refine", methods=["POST"])
+def mcp_refine():
+    """Stream component refinement via Server-Sent Events."""
+    data = request.get_json()
+    if not data or "modification" not in data:
+        return jsonify({"error": "Missing 'modification' field"}), 400
+
+    modification = data["modification"]
+    current_components = data.get("current_components", [])
+    project_summary = data.get("project_summary", "")
+
+    def generate():
+        try:
+            for event in stream_refinement(modification, current_components, project_summary):
+                yield f"data: {json.dumps(event)}\n\n"
+        except Exception as e:
+            app.logger.error(f"Refinement streaming error: {e}")
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
 
     return Response(

@@ -1,8 +1,7 @@
 /// <reference types="vite/client" />
 
 interface ImportMetaEnv {
-  readonly VITE_MCP_SERVER_URL?: string;
-  // Add other env variables here as needed
+  readonly VITE_BACKEND_URL?: string;
 }
 
 interface ImportMeta {

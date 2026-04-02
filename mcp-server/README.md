@@ -1,6 +1,6 @@
-# Nexar MCP Server
+# DigiKey MCP Server
 
-MCP server that provides `search_components` tool for querying Nexar Supply API. Follows [Dedalus Labs MCP Server Guidelines](https://docs.dedaluslabs.ai/server-guidelines).
+MCP server that provides a `search_components` tool for querying the DigiKey API.
 
 ## Setup
 
@@ -9,58 +9,35 @@ MCP server that provides `search_components` tool for querying Nexar Supply API.
 npm install
 ```
 
-2. **Set environment variables**:
+2. **Set environment variables** (see `.env.template`):
 ```bash
-export NEXAR_CLIENT_ID=your_client_id
-export NEXAR_CLIENT_SECRET=your_client_secret
+DIGIKEY_CLIENT_ID=your_client_id
+DIGIKEY_CLIENT_SECRET=your_client_secret
+PORT=8080
 ```
 
-3. **Build**:
+3. **Build & run**:
 ```bash
 npm run build
+npm start            # HTTP transport on port 8080
+npm run dev:stdio    # STDIO transport (for local MCP client testing)
 ```
-
-4. **Run server**:
-```bash
-# HTTP transport (production/cloud)
-npm start
-
-# STDIO transport (local development)
-npm run start:stdio
-```
-
-## Development
-
-```bash
-# Watch mode with HTTP transport
-npm run dev
-
-# Watch mode with STDIO transport
-npm run dev:stdio
-```
-
-## Upload to Dedalus
-
-After testing locally, upload this repository to Dedalus cloud to get a registry ID (e.g., "username/nexar-mcp").
 
 ## Tool: search_components
 
-- **Input**: `{query: string, limit?: number}`
-- **Output**: Array of PartObject (components from Nexar API)
-- **Description**: Searches Nexar Supply API for electronic components matching the query
-
-## PartObject Format
-
-Matches frontend `types.ts`:
-- Required: `mpn`, `manufacturer`, `description`, `price`
-- Optional: `currency`, `voltage`, `package`, `interfaces[]`, `datasheet`, `quantity`
+- **Input**: `{ query: string, limit?: number }`
+- **Output**: Array of components from DigiKey (mpn, manufacturer, description, price, etc.)
 
 ## Architecture
 
-Follows Dedalus Labs guidelines:
-- `src/index.ts` - Main entry point
-- `src/server.ts` - Server instance creation
-- `src/client.ts` - Nexar API client
-- `src/tools/nexar.ts` - Tool definitions
-- `src/transport/http.ts` - Streamable HTTP transport
-- `src/transport/stdio.ts` - STDIO transport (dev)
+```
+src/
+├── index.ts              # Entry point, HTTP transport startup
+├── server.ts             # MCP server instance
+├── client.ts             # DigiKey OAuth2 client
+├── config.ts             # Environment config
+├── tools/digikey.ts      # search_components tool implementation
+├── transport/http.ts     # Streamable HTTP transport
+├── transport/stdio.ts    # STDIO transport (dev)
+└── types.ts              # Shared types
+```

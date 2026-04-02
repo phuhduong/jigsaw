@@ -4,10 +4,13 @@ import { ArrowLeft, Pencil, Check, X } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import ComponentGraph from "./ComponentGraph";
+import type { ComponentGraphRef } from "./ComponentGraph";
 import PCBViewer from "./PCBViewer";
 import PartsList from "./PartsList";
-import type { PartObject } from "../services/mcp";
-import MCPChat from "./MCPChat";
+import type { PartObject } from "../services/api";
+import { componentAnalysisApi } from "../services/api";
+import type { ComponentAnalysisResponse } from "../services/api/componentAnalysisApi";
+import Chat from "./Chat";
 import { useNavigate } from "react-router";
 
 interface DesignInterfaceProps {
@@ -27,6 +30,7 @@ export default function DesignInterface({
   const [isEditingName, setIsEditingName] = useState(false);
   const [nameInput, setNameInput] = useState(projectName);
   const nameInputRef = useRef<HTMLInputElement>(null);
+  const componentGraphRef = useRef<ComponentGraphRef>(null);
 
   // Save project name to localStorage whenever it changes
   useEffect(() => {
@@ -175,6 +179,7 @@ export default function DesignInterface({
     // Stop analysis
     setIsAnalyzing(false);
     setIsAnalysisPaused(false);
+    setAnalysisComplete(false);
 
     // Reset all state
     setParts([]);
@@ -287,8 +292,72 @@ export default function DesignInterface({
     });
   };
 
+  const [analysisComplete, setAnalysisComplete] = useState(false);
+  const [isRefining, setIsRefining] = useState(false);
+
   const handleAnalysisComplete = () => {
     setIsAnalyzing(false);
+    setAnalysisComplete(true);
+  };
+
+  // Handle refinement request from chat
+  const handleRefinementSent = (modification: string) => {
+    // Do NOT set isAnalyzing — that would trigger ComponentGraph to start a full re-analysis.
+    // Refinement is handled directly here via the API.
+    setIsRefining(true);
+
+    // Build current component list from selectedComponents
+    const currentComponents = Array.from(selectedComponents.values()).map((c) => ({
+      component_id: c.id,
+      component_name: c.label,
+      part_data: c.partData || {},
+    }));
+
+    const projectSummary = previousQueryRef.current || analysisQuery || "";
+
+    componentAnalysisApi.startRefinement(
+      modification,
+      currentComponents,
+      projectSummary,
+      (update: ComponentAnalysisResponse) => {
+        // Push every event to ComponentGraph so the left panel updates
+        componentGraphRef.current?.processRefinementEvent(update);
+
+        if (update.type === "remove" && update.componentId) {
+          // Remove from parts list using the component's current partData
+          setSelectedComponents((prev) => {
+            const component = prev.get(update.componentId!);
+            if (component?.partData) {
+              setParts((prevParts) => prevParts.filter((p) => p.mpn !== component.partData!.mpn));
+            }
+            const newMap = new Map(prev);
+            newMap.delete(update.componentId!);
+            return newMap;
+          });
+        } else if (update.type === "selection" && update.componentId && update.partData) {
+          // Remove old part for this component_id before adding the new one
+          setSelectedComponents((prev) => {
+            const existing = prev.get(update.componentId!);
+            if (existing?.partData) {
+              setParts((prevParts) => prevParts.filter((p) => p.mpn !== existing.partData!.mpn));
+            }
+            return prev;
+          });
+          // Add the new component
+          handleComponentSelected(
+            update.componentId,
+            update.partData,
+            undefined,
+            0,
+          );
+        } else if (update.type === "complete") {
+          setAnalysisComplete(true);
+          setIsRefining(false);
+        } else if (update.type === "error") {
+          setIsRefining(false);
+        }
+      },
+    );
   };
 
   return (
@@ -378,6 +447,7 @@ export default function DesignInterface({
           className="w-[20vw] min-w-[280px] max-w-[400px] border-r border-zinc-800 bg-zinc-900/30 flex flex-col overflow-hidden h-full">
           <div className="flex-1 overflow-y-auto min-h-0">
             <ComponentGraph
+              ref={componentGraphRef}
               onComponentSelected={handleComponentSelected}
               analysisQuery={analysisQuery}
               isAnalyzing={isAnalyzing && !isAnalysisPaused}
@@ -408,15 +478,20 @@ export default function DesignInterface({
           <div className="flex-1 overflow-hidden min-h-0">
             <PCBViewer selectedComponents={selectedComponents} />
           </div>
-          {/* MCP Chat - fixed height at bottom */}
-          <div className="flex-shrink-0 border-t border-zinc-800 overflow-hidden">
-            <MCPChat
-              onQuerySent={handleQuerySent}
-              onContextRequested={handleChatContextRequested}
-              onContextProvided={handleChatContextProvided}
-              onQueryKilled={handleQueryKilled}
-            />
-          </div>
+          {/* Chat - only visible after initial analysis completes */}
+          {analysisComplete && (
+            <div className="flex-shrink-0 border-t border-zinc-800 overflow-hidden">
+              <Chat
+                onQuerySent={handleQuerySent}
+                onRefinementSent={handleRefinementSent}
+                onContextRequested={handleChatContextRequested}
+                onContextProvided={handleChatContextProvided}
+                onQueryKilled={handleQueryKilled}
+                analysisComplete={analysisComplete}
+                isRefining={isRefining}
+              />
+            </div>
+          )}
         </motion.div>
 
         {/* Right Panel - Parts List */}

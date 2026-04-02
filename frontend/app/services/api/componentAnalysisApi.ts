@@ -18,7 +18,7 @@ export interface ComponentSelection {
 }
 
 export interface ComponentAnalysisResponse {
-  type: "reasoning" | "selection" | "complete" | "error" | "context_request";
+  type: "reasoning" | "selection" | "complete" | "error" | "context_request" | "remove";
   componentId?: string;
   componentName?: string;
   reasoning?: string;
@@ -38,37 +38,26 @@ export interface ComponentAnalysisConfig {
 
 const defaultConfig: ComponentAnalysisConfig = {
   baseUrl: "http://localhost:3001",
-  analysisEndpoint: "/mcp/component-analysis",
+  analysisEndpoint: "/api/component-analysis",
   timeout: 60000,
 };
 
-async function realStartAnalysis(
-  query: string,
-  config: ComponentAnalysisConfig,
+async function streamSSE(
+  url: string,
+  body: Record<string, unknown>,
   onUpdate: (update: ComponentAnalysisResponse) => void,
   signal?: AbortSignal,
-  contextQueryId?: string,
-  context?: string
+  timeout?: number,
 ): Promise<void> {
   const controller = signal ? undefined : new AbortController();
   const abortSignal = signal || controller?.signal;
-
-  const timeoutId = config.timeout
-    ? setTimeout(() => controller?.abort(), config.timeout)
-    : null;
+  const timeoutId = timeout ? setTimeout(() => controller?.abort(), timeout) : null;
 
   try {
-    const requestBody: { query: string; contextQueryId?: string; context?: string } = { query };
-    if (contextQueryId && context) {
-      requestBody.contextQueryId = contextQueryId;
-      requestBody.context = context;
-    }
-
-    const url = `${config.baseUrl}${config.analysisEndpoint}`;
     const response = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(requestBody),
+      body: JSON.stringify(body),
       signal: abortSignal,
     });
 
@@ -81,7 +70,6 @@ async function realStartAnalysis(
 
     const reader = response.body?.getReader();
     const decoder = new TextDecoder();
-
     if (!reader) throw new Error("Response body is not readable");
 
     let buffer = "";
@@ -125,12 +113,32 @@ async function realStartAnalysis(
     if (timeoutId) clearTimeout(timeoutId);
     if (error.name === "AbortError") throw new Error("Analysis timeout or cancelled");
     if (error.message?.includes("Failed to fetch") || error.name === "TypeError") {
-      throw new Error(
-        `Failed to connect to backend at ${config.baseUrl}. Make sure the backend is running.`
-      );
+      throw new Error("Failed to connect to backend. Make sure it is running.");
     }
     throw error;
   }
+}
+
+async function realStartAnalysis(
+  query: string,
+  config: ComponentAnalysisConfig,
+  onUpdate: (update: ComponentAnalysisResponse) => void,
+  signal?: AbortSignal,
+  contextQueryId?: string,
+  context?: string
+): Promise<void> {
+  const body: Record<string, unknown> = { query };
+  if (contextQueryId && context) {
+    body.contextQueryId = contextQueryId;
+    body.context = context;
+  }
+  return streamSSE(
+    `${config.baseUrl}${config.analysisEndpoint}`,
+    body,
+    onUpdate,
+    signal,
+    config.timeout,
+  );
 }
 
 class ComponentAnalysisService {
@@ -168,6 +176,43 @@ class ComponentAnalysisService {
         return;
       }
       onUpdate({ type: "error", message: error.message || "Analysis failed" });
+      throw error;
+    } finally {
+      if (this.currentAnalysis === controller) this.currentAnalysis = null;
+    }
+  }
+
+  async startRefinement(
+    modification: string,
+    currentComponents: Array<{ component_id: string; component_name: string; part_data: Record<string, unknown> }>,
+    projectSummary: string,
+    onUpdate: (update: ComponentAnalysisResponse) => void,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    if (this.currentAnalysis) this.currentAnalysis.abort();
+
+    const controller = signal ? undefined : new AbortController();
+    this.currentAnalysis = controller ?? null;
+    const abortSignal = signal || controller?.signal;
+
+    try {
+      await streamSSE(
+        `${this.config.baseUrl}/api/refine`,
+        {
+          modification,
+          current_components: currentComponents,
+          project_summary: projectSummary,
+        },
+        onUpdate,
+        abortSignal,
+        this.config.timeout,
+      );
+    } catch (error: any) {
+      if (error.name === "AbortError" || error.message?.includes("cancelled")) {
+        onUpdate({ type: "error", message: "Refinement cancelled" });
+        return;
+      }
+      onUpdate({ type: "error", message: error.message || "Refinement failed" });
       throw error;
     } finally {
       if (this.currentAnalysis === controller) this.currentAnalysis = null;

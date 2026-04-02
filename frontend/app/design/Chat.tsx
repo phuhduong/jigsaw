@@ -5,7 +5,7 @@ import { Button } from "../components/ui/button";
 import { Textarea } from "../components/ui/textarea";
 import { ScrollArea } from "../components/ui/scroll-area";
 import { Badge } from "../components/ui/badge";
-import { mcpApi, API_CONFIG } from "../services/mcp";
+import { chatApi } from "../services/api";
 import JigsawIcon from "./JigsawIcon";
 
 type ChatState = "idle" | "waiting" | "waiting_for_context" | "error";
@@ -17,21 +17,25 @@ interface Message {
   timestamp: Date;
 }
 
-interface MCPChatProps {
-  mcpServerUrl?: string;
+interface ChatProps {
   onQuerySent?: (query: string) => void;
+  onRefinementSent?: (modification: string) => void;
   onContextRequested?: () => void;
   onContextProvided?: () => void;
   onQueryKilled?: () => void;
+  analysisComplete?: boolean;
+  isRefining?: boolean;
 }
 
-export default function MCPChat({
-  mcpServerUrl,
+export default function Chat({
   onQuerySent,
+  onRefinementSent,
   onContextRequested,
   onContextProvided,
   onQueryKilled,
-}: MCPChatProps) {
+  analysisComplete,
+  isRefining = false,
+}: ChatProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [state, setState] = useState<ChatState>("idle");
@@ -40,12 +44,6 @@ export default function MCPChat({
   const abortControllerRef = useRef<AbortController | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-
-  useEffect(() => {
-    const baseUrl = mcpServerUrl || API_CONFIG.baseUrl;
-    mcpApi.updateConfig({ baseUrl });
-    mcpApi.setUseMock(API_CONFIG.useMock);
-  }, [mcpServerUrl]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -94,7 +92,7 @@ export default function MCPChat({
       const controller = new AbortController();
       abortControllerRef.current = controller;
 
-      const data = await mcpApi.sendContext(
+      const data = await chatApi.sendContext(
         contextResponse,
         currentQueryId,
         controller.signal
@@ -146,6 +144,13 @@ export default function MCPChat({
     addMessage("user", query);
     setInput("");
 
+    // If analysis is complete, this is a refinement request
+    if (analysisComplete && onRefinementSent) {
+      onRefinementSent(query);
+      setState("idle");
+      return;
+    }
+
     if (onQuerySent) {
       onQuerySent(query);
     }
@@ -154,7 +159,7 @@ export default function MCPChat({
       const controller = new AbortController();
       abortControllerRef.current = controller;
 
-      const data = await mcpApi.sendQuery(query, controller.signal);
+      const data = await chatApi.sendQuery(query, controller.signal);
 
       if (data.type === "context_request") {
         const queryId = data.queryId || data.requestId || "unknown";
@@ -219,9 +224,16 @@ export default function MCPChat({
             <div className="absolute inset-0 w-2 h-2 rounded-full bg-emerald-400/30 animate-ping"></div>
           </div>
           <h3 className="text-sm font-semibold text-zinc-200 tracking-wide">
-            MCP Interface
+            Chat
           </h3>
-          {state !== "idle" && (
+          {isRefining && (
+            <Badge
+              variant="outline"
+              className="text-[10px] border-blue-500/50 text-blue-400 bg-blue-500/10">
+              Refining
+            </Badge>
+          )}
+          {!isRefining && state !== "idle" && (
             <Badge
               variant="outline"
               className={`text-[10px] ${
@@ -362,14 +374,16 @@ export default function MCPChat({
             placeholder={
               state === "waiting_for_context"
                 ? "Provide the requested context..."
-                : "Query the MCP server..."
+                : analysisComplete
+                ? "Refine components... (e.g., 'swap MCU for something cheaper')"
+                : "Describe your circuit to begin..."
             }
-            disabled={state === "waiting"}
+            disabled={state === "waiting" || isRefining}
             className="flex-1 bg-zinc-900/60 border-zinc-700/50 text-zinc-100 placeholder:text-zinc-500 placeholder:font-light resize-none min-h-[56px] max-h-[100px] rounded-lg focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/20 transition-all overflow-y-auto"
           />
           <Button
             type="submit"
-            disabled={!input.trim() || state === "waiting"}
+            disabled={!input.trim() || state === "waiting" || isRefining}
             className="bg-gradient-to-br from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-white h-[56px] px-5 rounded-lg shadow-lg shadow-emerald-500/20 disabled:opacity-50 disabled:cursor-not-allowed transition-all">
             {state === "waiting" ? (
               <Loader2 className="w-4 h-4 animate-spin" />

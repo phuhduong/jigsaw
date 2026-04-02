@@ -2,9 +2,13 @@
 Component search via the DigiKey MCP server.
 """
 
-import os
 import json
+import logging
+import os
+
 import requests
+
+logger = logging.getLogger(__name__)
 
 MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://localhost:8080")
 
@@ -145,7 +149,7 @@ def search_components(query: str, specifications: dict | None = None) -> list[di
         try:
             return _do_search(search_query)
         except Exception as e:
-            print(f"MCP server error (attempt {attempt + 1}): {e}")
+            logger.error("MCP server error (attempt %d): %s", attempt + 1, e)
             if attempt == 0:
                 _reset_session()
             else:
