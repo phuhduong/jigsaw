@@ -1,27 +1,27 @@
 """Local/private single-process API. Progress streams; consistent snapshots are saved."""
+
 from __future__ import annotations
+
 import json
 import logging
 import os
 from pathlib import Path
 from threading import Lock
 
+from documents import DocumentStore
 from dotenv import load_dotenv
-load_dotenv(Path(__file__).with_name(".env"))
-
 from flask import Flask, Response, jsonify, request, stream_with_context
 from flask_cors import CORS
-from pydantic import ValidationError
-
-from documents import DocumentStore
 from models import AnalysisRequest, DesignRun, RefinementRequest, Usage, now
 from pipeline import Workflow
-from run_store import RunStore, bom_rows, export_csv, export_json
+from pydantic import ValidationError
+from run_store import RunStore, export_csv, export_json, run_snapshot
 
 logger = logging.getLogger(__name__)
 
 
 def create_app(store=None, workflow=None):
+    load_dotenv(Path(__file__).with_name(".env"))
     app = Flask(__name__)
     app.config["MAX_CONTENT_LENGTH"] = 65536
     CORS(app, origins=[os.getenv("FRONTEND_ORIGIN", "http://localhost:5173")])
@@ -31,9 +31,6 @@ def create_app(store=None, workflow=None):
     store.interrupt_unfinished()
     admission = Lock()
     app.extensions.update(run_store=store, workflow=workflow, admission=admission)
-
-    def snapshot(run):
-        return {**run.model_dump(mode="json"), "bom": bom_rows(run)}
 
     def start(run):
         if not admission.acquire(blocking=False):
@@ -45,6 +42,7 @@ def create_app(store=None, workflow=None):
             if not released:
                 released = True
                 admission.release()
+
         try:
             store.save(run)
         except Exception:
@@ -63,22 +61,25 @@ def create_app(store=None, workflow=None):
                 return "data: " + json.dumps({"type": kind, "run_id": run.id, "sequence": sequence, **fields}) + "\n\n"
 
             try:
-                yield event("started", snapshot=snapshot(run))
+                yield event("started", snapshot=run_snapshot(run))
                 iterator = workflow.execute(run)
                 for item in iterator:
                     kind = item["type"]
                     fields = {k: v for k, v in item.items() if k != "type"}
                     if kind in {"snapshot", "complete", "error"}:
                         store.save(run)
-                        fields["snapshot"] = snapshot(run)
+                        fields["snapshot"] = run_snapshot(run)
                     if kind in {"complete", "error"}:
                         terminal_sent = True
                     yield event(kind, **fields)
                 if not terminal_sent:
                     store.save(run)
                     terminal_sent = True
-                    yield event("error" if run.lifecycle == "error" else "complete",
-                                message=run.terminal_reason, snapshot=snapshot(run))
+                    yield event(
+                        "error" if run.lifecycle == "error" else "complete",
+                        message=run.terminal_reason,
+                        snapshot=run_snapshot(run),
+                    )
             except GeneratorExit:
                 if iterator is not None:
                     iterator.close()
@@ -97,12 +98,12 @@ def create_app(store=None, workflow=None):
                 except Exception:
                     logger.exception("Failed to save terminal error")
                 terminal_sent = True
-                yield event("error", message=run.terminal_reason, snapshot=snapshot(run))
+                yield event("error", message=run.terminal_reason, snapshot=run_snapshot(run))
             finally:
                 try:
                     if iterator is not None:
                         iterator.close()
-                    if run.lifecycle in {"interrupted", "error"}:
+                    if not terminal_sent and run.lifecycle in {"interrupted", "error"}:
                         run.updated_at = now()
                         store.save(run)
                 except Exception:
@@ -110,10 +111,16 @@ def create_app(store=None, workflow=None):
                 finally:
                     release()
 
-        response = Response(stream_with_context(generate()), mimetype="text/event-stream", headers={
-            "Cache-Control": "no-cache", "X-Accel-Buffering": "no",
-            "X-Run-Id": run.id,
-        })
+        response = Response(
+            stream_with_context(generate()),
+            mimetype="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+                "X-Run-Id": run.id,
+            },
+        )
+
         # Also release when a response is closed without starting its generator.
         def closed():
             if not released:
@@ -124,15 +131,19 @@ def create_app(store=None, workflow=None):
                     store.save(run)
                 finally:
                     release()
+
         response.call_on_close(closed)
         return response
 
     @app.errorhandler(ValidationError)
     def invalid(error):
-        return jsonify(error="Invalid request", details=[
-            {"field": ".".join(str(x) for x in e["loc"]), "message": e["msg"]}
-            for e in error.errors(include_input=False)
-        ]), 400
+        return jsonify(
+            error="Invalid request",
+            details=[
+                {"field": ".".join(str(x) for x in e["loc"]), "message": e["msg"]}
+                for e in error.errors(include_input=False)
+            ],
+        ), 400
 
     @app.post("/api/component-analysis")
     def analyze():
@@ -155,7 +166,9 @@ def create_app(store=None, workflow=None):
             questions = {q.id: q for q in base.pending_questions}
             if set(body.answers) != set(questions):
                 return jsonify(error="Answers must match all pending question IDs on the base run"), 400
-            modification = "\n".join(f"{questions[key].question}\nAnswer: {value}" for key, value in body.answers.items())
+            modification = "\n".join(
+                f"{questions[key].question}\nAnswer: {value}" for key, value in body.answers.items()
+            )
         if not modification or not modification.strip():
             return jsonify(error="Modification must not be blank"), 400
         run = base.model_copy(deep=True)
@@ -164,15 +177,16 @@ def create_app(store=None, workflow=None):
         run.prompt_version = fresh.prompt_version
         run.parent_run_id, run.modification = base.id, modification
         run.revision += 1
-        run.lifecycle, run.compatibility, run.stage = "running", "incomplete", "started"
-        run.review_completed, run.terminal_reason = False, ""
-        run.pending_questions, run.findings, run.usage = [], [], Usage()
+        run.lifecycle, run.stage = "running", "started"
+        run.invalidate_review()
+        run.terminal_reason = ""
+        run.pending_questions, run.usage = [], Usage()
         return start(run)
 
     @app.get("/api/runs/<run_id>")
     def get_run(run_id):
         try:
-            return jsonify(snapshot(store.load(run_id)))
+            return jsonify(run_snapshot(store.load(run_id)))
         except (FileNotFoundError, ValueError):
             return jsonify(error="Run not found"), 404
 
@@ -186,8 +200,11 @@ def create_app(store=None, workflow=None):
         if format_ not in {"csv", "json"}:
             return jsonify(error="Export format must be csv or json"), 400
         content = export_csv(run) if format_ == "csv" else export_json(run)
-        return Response(content, mimetype="text/csv" if format_ == "csv" else "application/json",
-                        headers={"Content-Disposition": f'attachment; filename="jigsaw-{run.id}-r{run.revision}.{format_}"'})
+        return Response(
+            content,
+            mimetype="text/csv" if format_ == "csv" else "application/json",
+            headers={"Content-Disposition": f'attachment; filename="jigsaw-{run.id}-r{run.revision}.{format_}"'},
+        )
 
     @app.post("/api/query")
     @app.post("/api/continue")
@@ -201,9 +218,8 @@ def create_app(store=None, workflow=None):
     return app
 
 
-app = create_app()
-
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
-    app.run(host="127.0.0.1", port=int(os.getenv("PORT", "3001")),
-            threaded=True, debug=False, use_reloader=False)
+    create_app().run(
+        host="127.0.0.1", port=int(os.getenv("PORT", "3001")), threaded=True, debug=False, use_reloader=False
+    )

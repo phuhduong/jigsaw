@@ -32,9 +32,18 @@ The [independent source audit](backend/evaluations/prompt18-sensor-audit.md) acc
 the selected parts under the recorded operating assumptions and ordinary pre-layout
 placement choices. Sourcing is partial: one bypass capacitor has a purchase link
 but no supplier price/stock offer; $9.34 is the known subtotal excluding that part.
-All 59 backend tests pass, and saved/streamed/JSON/CSV results agree. This establishes
+The deterministic backend tests pass, and saved/streamed/JSON/CSV results agree. This establishes
 one unattended positive baseline, not a reliability rate across arbitrary requests.
 See the [actual results and earlier failures](backend/evaluations/results.md).
+
+The latest [backend cleanup](backend/evaluations/cleanup-review.md) passes local tests,
+saved-run regression checks and a fresh original-query run (`29c85ccd`). Independent source
+review accepts its 15 placements / 12 MPNs under the saved operating assumptions; all have
+supplier offers totaling $9.76 at the snapshot. It completed in 105 seconds using 14 model
+calls. Its explanatory record still contains nonblocking model errors. Earlier trials
+include a falsely checked BOM with a material support-part problem, so repeatability and
+model-review reliability remain unqualified; the cleanup did not change the applicable
+code checks. Both successes and failures remain in the evaluation record.
 
 ---
 
@@ -132,7 +141,6 @@ From the repository root, after installing dependencies:
 ```bash
 cd backend
 .venv/bin/python -m unittest discover -s tests
-.venv/bin/python ../mcp-server/tests/test_supplier.py
 cd ../mcp-server
 npm test
 cd ../frontend
@@ -143,10 +151,9 @@ yarn build
 These checks use local fakes or compile the application; they do not call live
 models or suppliers. Live model/PDF capability checks and source-grounded design
 evaluation are separate, quota-consuming work described in the backend guide.
-Local verification and live guided BOM audit have been performed; automated
-completion has not been achieved. The earlier three-frozen-trial evaluation plan
-remains historical, not a gate for this narrowed implementation task. A guided,
-audited BOM is not proof of unattended generation or reliability across requests.
+Local verification and an independently audited unattended sensor run have passed.
+The earlier evaluation plan remains historical, not a gate for this BOM-only workflow.
+Successful examples are not proof of reliability across arbitrary requests.
 The [backend verification guide](backend/README.md#verification) includes fresh-run
 and saved-run refinement commands.
 

@@ -49,8 +49,8 @@ MCP initialization in the same deadline and raises `SupplierError` on failure.
 ## Verification
 
 `npm test` builds and runs three deterministic catalog tests with local fakes.
-From the repository root, run `backend/.venv/bin/python mcp-server/tests/test_supplier.py`
-for the Python MCP-boundary tests. Neither test suite calls a live provider.
+From `backend/`, run `.venv/bin/python -m unittest discover -s tests` for the backend
+suite, including the Python MCP-boundary tests. Neither suite calls a live provider.
 
 ## Architecture
 

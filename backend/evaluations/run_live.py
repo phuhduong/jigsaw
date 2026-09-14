@@ -1,17 +1,14 @@
 """Opt-in live smoke run against an already running backend; consumes provider quota."""
+
 import argparse
 import json
-from pathlib import Path
 import sys
 import time
+from pathlib import Path
 
 import requests
 
-
-DEFAULT_QUERY = (
-    "Make me a temperature and humidity sensor with WiFi and Bluetooth "
-    "powered by USB-C for consumer use."
-)
+DEFAULT_QUERY = "Make me a temperature and humidity sensor with WiFi and Bluetooth powered by USB-C for consumer use."
 
 
 def concise(value):
@@ -24,7 +21,9 @@ def main():
     parser.add_argument("--url", default="http://127.0.0.1:3001", help="Backend base URL")
     parser.add_argument("--base-run-id", help="Saved run to refine; requires --modification")
     parser.add_argument("--modification", help="Requested change; requires --base-run-id")
-    parser.add_argument("--record", type=Path, help="Save all SSE JSON events to a new JSONL file; never overwrite an existing file")
+    parser.add_argument(
+        "--record", type=Path, help="Save all SSE JSON events to a new JSONL file; never overwrite an existing file"
+    )
     args = parser.parse_args()
     if (args.base_run_id is None) != (args.modification is None):
         parser.error("--base-run-id and --modification must be provided together")
@@ -48,7 +47,9 @@ def main():
         print("Starting live smoke run (uses model/supplier quota).", flush=True)
         with requests.post(
             f"{args.url.rstrip('/')}{path}",
-            json=payload, stream=True, timeout=(10, 60),
+            json=payload,
+            stream=True,
+            timeout=(10, 60),
         ) as response:
             if not response.ok:
                 print(f"Start failed: HTTP {response.status_code}", file=sys.stderr)
@@ -76,8 +77,10 @@ def main():
                     print(f"Run: {run_id}", flush=True)
                 sequence = event["sequence"]
                 if event["type"] == "progress":
-                    print(f"[{sequence}] {concise(event.get('stage', 'progress'))}: "
-                          f"{concise(event.get('message', ''))}", flush=True)
+                    print(
+                        f"[{sequence}] {concise(event.get('stage', 'progress'))}: {concise(event.get('message', ''))}",
+                        flush=True,
+                    )
                 if event["type"] in {"complete", "error"}:
                     terminal = event
             # Drain through EOF so normal completion closes the request cleanly.
@@ -98,21 +101,38 @@ def main():
         print("No terminal snapshot received; this is an interrupted run, not success.", file=sys.stderr)
         return 1
     snapshot = terminal["snapshot"]
-    print("Outcome: " + ", ".join(f"{key}={snapshot.get(key, 'unknown')}"
-          for key in ("lifecycle", "compatibility", "sourcing")))
+    print(
+        "Outcome: "
+        + ", ".join(f"{key}={snapshot.get(key, 'unknown')}" for key in ("lifecycle", "compatibility", "sourcing"))
+    )
     print("Reason: " + concise(snapshot.get("terminal_reason", "")))
     usage = snapshot.get("usage", {})
-    print("Usage: " + ", ".join(f"{key}={usage.get(key, 'unknown')}" for key in (
-        "model_calls", "input_tokens", "output_tokens", "supplier_calls", "documents",
-        "pdf_pages", "correction_rounds", "elapsed_seconds",
-    )))
-    unresolved = [finding for finding in snapshot.get("findings", [])
-                  if finding.get("revision") == snapshot.get("revision")
-                  and finding.get("kind") == "check" and finding.get("status") in {"fail", "unknown"}]
+    print(
+        "Usage: "
+        + ", ".join(
+            f"{key}={usage.get(key, 'unknown')}"
+            for key in (
+                "model_calls",
+                "input_tokens",
+                "output_tokens",
+                "supplier_calls",
+                "documents",
+                "pdf_pages",
+                "correction_rounds",
+                "elapsed_seconds",
+            )
+        )
+    )
+    unresolved = [
+        finding
+        for finding in snapshot.get("findings", [])
+        if finding.get("revision") == snapshot.get("revision")
+        and finding.get("kind") == "check"
+        and finding.get("status") in {"fail", "unknown"}
+    ]
     print(f"Current failed/unknown checks: {len(unresolved)}")
     for finding in unresolved:
-        print(f"- {finding['status']} [{concise(finding.get('id', ''))}]: "
-              f"{concise(finding.get('explanation', ''))}")
+        print(f"- {finding['status']} [{concise(finding.get('id', ''))}]: {concise(finding.get('explanation', ''))}")
     return 0 if terminal["type"] == "complete" and snapshot.get("compatibility") == "checked" else 1
 
 

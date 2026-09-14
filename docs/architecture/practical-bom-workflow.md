@@ -1,13 +1,20 @@
 # Jigsaw: autonomous BOM selection and compatibility review
 
 Date: 2026-09-14  
-Status: BOM-only scope implemented; fresh unattended sensor run checked and independently source-audited; sourcing partial  
+Status: BOM-only scope implemented; cleanup verified with a fresh conditional BOM success; general reliability unqualified
 Scope: a small, free side project using the existing React, Flask, Pydantic, LangChain, and DigiKey integration  
 Review record: [independent and adversarial review](practical-bom-workflow-review.md)
 
-This document defines the implementation direction requested in the current product discussion. The latest scope is BOM compatibility, explicitly not schematic or wiring design. This narrows the existing workflow rather than introducing another architecture. The earlier [design-compiler proposal](nl-to-validated-bom.md) and prior review/evaluation records remain historical material; their wiring deliverables, qualification gates, and infrastructure are not requirements of this scope. The implementation has 59 passing backend tests. Fresh Flash-Lite run `149dc533` completed compatibility review without developer-supplied parts/pages and passed the [independent source audit](../../backend/evaluations/prompt18-sensor-audit.md) under its operating assumptions. Its sourcing is partial for one capacitor. This is one unattended positive baseline, not a general reliability or hardware-qualification claim.
+This document defines the implementation direction requested in the current product discussion. The latest scope is BOM compatibility, explicitly not schematic or wiring design. This narrows the existing workflow rather than introducing another architecture. The earlier [design-compiler proposal](nl-to-validated-bom.md) and prior review/evaluation records remain historical material; their wiring deliverables, qualification gates, and infrastructure are not requirements of this scope. The deterministic backend suite passes. Fresh Flash-Lite run `149dc533` completed compatibility review without developer-supplied parts/pages and passed the [independent source audit](../../backend/evaluations/prompt18-sensor-audit.md) under its operating assumptions. Its sourcing is partial for one capacitor. This is one unattended positive baseline, not a general reliability or hardware-qualification claim.
 
 ## 1. Decision and product promise
+
+Current cleanup verification is recorded in the [cleanup review](../../backend/evaluations/cleanup-review.md).
+Local regression checks pass, and fresh run `29c85ccd` passed independent original-source
+review under its saved operating assumptions without manual repairs. Earlier cleanup trials
+include a falsely checked result with a material support-part problem. Code findings match
+the baseline across all saved terminal runs; general model-review reliability remains
+unqualified. One success does not resolve that limitation or justify a larger architecture.
 
 Build one explicit Python workflow that interprets a request, selects actual parts, reads manufacturer documentation, adds supporting components, reviews BOM compatibility, repairs identified problems within a budget, and exports a BOM with purchase links. LangChain provides model integration. Ordinary application code owns state, checks, budgets, and completion.
 
@@ -51,7 +58,7 @@ flowchart LR
     D -->|review finished or budget exhausted| F[BOM, sourcing, checks, open issues]
 ```
 
-These are functions and structured model calls in one backend workflow, not separately deployed agents. `pipeline.py` owns their order and the complete working design. Model stages return proposed data; application code validates and applies it.
+These are functions and structured model calls in one backend workflow, not separately deployed agents. `pipeline.py` owns their order and the complete working design. Model stages return proposed data; application code validates and applies it. `Requirement.component_ids` is the single active requirement mapping. Source extraction alone replaces verified observations; configuration proposals reference that ledger without rewriting it. Saved records, model context and exports are projections maintained in `run_store.py`, not parallel design states.
 
 | Stage | Inputs and responsibility | Output and stopping behavior |
 |---|---|---|
@@ -214,19 +221,18 @@ These are starting operating limits to measure, not assertions about cost or com
 
 LangChain remains the model abstraction: one factory selects provider/model, credentials, structured-output mode, and capabilities. Stage functions accept the common model interface, not `ChatGoogleGenerativeAI`. Baseline support requires structured responses; document/review capability additionally requires the actual PDF fixture. Configure one model initially; a separate review model is optional if evaluation shows benefit. LangChain supports standalone model calls and document content blocks, but provider-specific capabilities must be checked in our integration tests. [Model interface](https://docs.langchain.com/oss/python/langchain/models), [document messages](https://docs.langchain.com/oss/python/langchain/messages).
 
-| Existing location | Ownership after implementation |
+| Current location | Ownership |
 |---|---|
 | `backend/app.py` | Request validation, admission, SSE, run retrieval/export. |
 | `backend/pipeline.py` | Stage sequence, working design, budgets, bounded repair, terminal handling. |
 | `backend/models.py` | Nested design and stage-response schemas; no universal electronics ontology. |
-| `backend/agents/requirements_parser.py` | Request interpretation and proposed design. Names can remain to avoid cosmetic migration. |
-| `backend/agents/component_retriever.py` | Contextual candidate selection and support-part sourcing. |
-| `backend/agents/validation_agent.py` | Whole-design model review and structured findings. |
+| `backend/stages.py` | Plain request-planning, candidate-selection and whole-BOM review calls. |
+| `backend/prompts.py` | Shared BOM/configuration rules and focused stage instructions. |
 | `backend/tools.py` + existing MCP | Narrow supplier calls; provider errors are errors, not synthetic parts. |
-| New `backend/documents.py` | Bounded source discovery, acquisition, pages, and extraction/cache. |
-| New `backend/checks.py` | Explicit calculations, integrity checks, and outcome aggregation. |
-| New `backend/run_store.py` | Atomic JSON run persistence and JSON/CSV projection. |
-| New `backend/llm.py` | LangChain model factory, provider capabilities, bounded calls and usage. |
+| `backend/documents.py` | Bounded source discovery, acquisition, pages, and extraction/cache. |
+| `backend/checks.py` | Explicit calculations, integrity checks, and outcome aggregation. |
+| `backend/run_store.py` | Atomic JSON run persistence and JSON/CSV projection. |
+| `backend/llm.py` | LangChain model factory, provider capabilities, bounded calls and usage. |
 
 Preserve optional tracing but do not make LangSmith available or configured a condition of producing a result. Pin a mutually compatible dependency set after running the provider fixtures; current open-ended version ranges do not establish compatibility. No database migration or endpoint framework rewrite is part of this plan.
 
@@ -242,7 +248,7 @@ Completion requires:
 2. Run the user's sensor request through actual catalog selection, source interpretation, support selection, numeric checks, whole-BOM review, bounded correction, and export using Flash-Lite within the existing limits. Save the outcome and usage. An unfinished compatibility review is a recorded result, not a successful example. Report sourcing separately: unknown offers must stay unknown, even when the electrical compatibility assessment succeeds.
 3. Independently audit that actual BOM against original sources: requested functions and exact variants; feasible shared supply/current/logic/resource assumptions; necessary support values, ratings, quantities, and module boundaries; material citation accuracy; purchasing identities/links and matching exports. Resolve concrete defects or report them. Do not demand a schematic, numbered-pin plan, or completed programming/reset wiring.
 
-Actual status: 59 backend tests pass. Fresh original-query Flash-Lite run `149dc53304e146f584d6159366e663ee` completed current review with compatibility `checked` in 131.60 seconds and passed the [independent source audit](../../backend/evaluations/prompt18-sensor-audit.md), without manual component/page guidance or run edits. Saved state, live response and JSON/CSV exports agree. Its 15 placements / 13 MPNs have purchase links; sourcing remains `partial` because C4 has no supplier price/stock offer, and the known $9.34 subtotal excludes it. See the [run results](../../backend/evaluations/results.md) for earlier failures and limits. This is one unattended positive baseline, not broad reliability or hardware qualification.
+The deterministic backend suite passes. Fresh original-query Flash-Lite run `149dc53304e146f584d6159366e663ee` completed current review with compatibility `checked` in 131.60 seconds and passed the [independent source audit](../../backend/evaluations/prompt18-sensor-audit.md), without manual component/page guidance or run edits. Saved state, live response and JSON/CSV exports agree. Its 15 placements / 13 MPNs have purchase links; sourcing remains `partial` because C4 has no supplier price/stock offer, and the known $9.34 subtotal excludes it. See the [run results](../../backend/evaluations/results.md) for earlier failures and limits. This is one unattended positive baseline, not broad reliability or hardware qualification.
 
 The earlier three-frozen-trial positive/mutation suite and held-out plan remain historical evaluation material, not mandatory gates for this narrowed task. Preserve their recorded outcomes without relabeling them. Applicable manufacturer facts remain useful references; former wiring requirements do not carry forward. Further repeated or held-out evaluation can measure breadth later, without expanding the current implementation scope.
 

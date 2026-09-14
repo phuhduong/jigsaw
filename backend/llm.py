@@ -1,4 +1,5 @@
 """Model portability, resource accounting and bounded calls; no orchestration framework."""
+
 from __future__ import annotations
 
 import json
@@ -9,9 +10,8 @@ from collections import deque
 
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import HumanMessage, SystemMessage
-from pydantic import BaseModel
-
 from models import DesignRun
+from pydantic import BaseModel, ValidationError
 
 
 class BudgetExceeded(RuntimeError):
@@ -20,6 +20,18 @@ class BudgetExceeded(RuntimeError):
 
 class ModelError(RuntimeError):
     pass
+
+
+def _describe_schema_error(error):
+    """Expose schema fields/rules, never the provider's raw response or input values."""
+    while error.__cause__ is not None:
+        error = error.__cause__
+    if isinstance(error, ValidationError):
+        return "; ".join(
+            f"{'.'.join(map(str, item['loc'])) or 'response'}: {item['msg']}"
+            for item in error.errors(include_input=False, include_context=False, include_url=False)
+        )[:500]
+    return type(error).__name__
 
 
 class Budget:
@@ -74,15 +86,23 @@ class ModelGateway:
         """Yield progress before each attempt; return validated data through yield-from."""
         if pdf_pages and not self.pdf_supported:
             raise ModelError("Configured model has no verified PDF input capability")
-        text = json.dumps(payload, ensure_ascii=False, separators=(",", ":"), default=lambda value: value.model_dump(mode="json") if isinstance(value, BaseModel) else str(value))
+        payload_text = json.dumps(
+            payload,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            default=lambda value: value.model_dump(mode="json") if isinstance(value, BaseModel) else str(value),
+        )
         blocks = blocks or []
         # PDF bytes are not text tokens. Reserve separately for page input.
-        text_size = len(instructions) + len(text) + len(json.dumps(schema.model_json_schema()))
-        text_size += sum(len(b.get("text", "")) for b in blocks)
+        text_size = len(instructions) + len(payload_text) + len(json.dumps(schema.model_json_schema()))
+        text_size += sum(len(block.get("text", "")) for block in blocks)
         estimate = (text_size + 2) // 3 + pdf_pages * 1200
         if estimate + max_output > self.context_limit or estimate > self.tpm:
             raise BudgetExceeded("Required source context exceeds the configured model allowance")
-        messages = [SystemMessage(content=instructions), HumanMessage(content=[{"type": "text", "text": text}, *blocks])]
+        messages = [
+            SystemMessage(content=instructions),
+            HumanMessage(content=[{"type": "text", "text": payload_text}, *blocks]),
+        ]
         model = self.model or get_llm()
         for attempt in range(2):
             budget.remaining()
@@ -90,7 +110,7 @@ class ModelGateway:
                 current = time.monotonic()
                 while _requests and current - _requests[0][0] >= 60:
                     _requests.popleft()
-                if len(_requests) < self.rpm and sum(n for _, n in _requests) + estimate <= self.tpm:
+                if len(_requests) < self.rpm and sum(tokens for _, tokens in _requests) + estimate <= self.tpm:
                     break
                 wait = max(0, 60.1 - (current - _requests[0][0]))
                 if wait > budget.remaining():
@@ -98,8 +118,12 @@ class ModelGateway:
                 pause = min(50, wait)
                 yield {"type": "progress", "stage": stage, "message": f"Waiting {pause:.0f}s for model quota"}
                 time.sleep(pause)
-            reservation = {"model_calls": 1, "input_tokens": estimate,
-                           "output_tokens": max_output, "pdf_pages": pdf_pages}
+            reservation = {
+                "model_calls": 1,
+                "input_tokens": estimate,
+                "output_tokens": max_output,
+                "pdf_pages": pdf_pages,
+            }
             for field, amount in reservation.items():
                 if getattr(budget.run.usage, field) + amount > getattr(budget.run.limits, field):
                     raise BudgetExceeded(f"Run {field} budget exhausted")
@@ -109,40 +133,64 @@ class ModelGateway:
             yield {"type": "progress", "stage": stage, "message": f"{stage}: model attempt {attempt + 1}"}
             try:
                 result = model.with_structured_output(schema, method="json_schema", include_raw=True).invoke(
-                    messages, max_output_tokens=max_output, timeout=min(45, budget.remaining()), max_retries=0,
+                    messages,
+                    max_output_tokens=max_output,
+                    timeout=min(45, budget.remaining()),
+                    max_retries=0,
                 )
                 raw = result.get("raw")
                 usage = getattr(raw, "usage_metadata", None)
                 if usage:
-                    logging.getLogger(__name__).info("%s: input=%s output=%s", stage, usage.get("input_tokens"), usage.get("output_tokens"))
+                    logging.getLogger(__name__).info(
+                        "%s: input=%s output=%s",
+                        stage,
+                        usage.get("input_tokens"),
+                        usage.get("output_tokens"),
+                    )
                     budget.run.usage.input_tokens += usage.get("input_tokens", estimate) - estimate
                     budget.run.usage.output_tokens += usage.get("output_tokens", max_output) - max_output
-                    if (budget.run.usage.input_tokens > budget.run.limits.input_tokens or
-                            budget.run.usage.output_tokens > budget.run.limits.output_tokens):
+                    if (
+                        budget.run.usage.input_tokens > budget.run.limits.input_tokens
+                        or budget.run.usage.output_tokens > budget.run.limits.output_tokens
+                    ):
                         raise BudgetExceeded("Reported model usage exhausted the run token budget")
-                if result.get("parsing_error") or result.get("parsed") is None:
+                if result.get("parsing_error"):
+                    raise ModelError("Model response rejected: " + _describe_schema_error(result["parsing_error"]))
+                if result.get("parsed") is None:
                     raise ModelError("Model response did not match the required schema")
                 parsed = result["parsed"]
                 return parsed if isinstance(parsed, schema) else schema.model_validate(parsed)
+            except BudgetExceeded:
+                raise
             except Exception as error:
-                if isinstance(error, BudgetExceeded):
-                    raise
-                message = str(error)
+                message = _describe_schema_error(error) if isinstance(error, ValidationError) else str(error)
                 for key in ("GEMINI_API_KEY", "LANGCHAIN_API_KEY", "LANGSMITH_API_KEY"):
                     secret = os.getenv(key)
                     if secret:
                         message = message.replace(secret, "[redacted]")
-                transient = any(code in message for code in ("429", "500", "502", "503", "504", "RESOURCE_EXHAUSTED", "UNAVAILABLE"))
-                malformed = isinstance(error, ModelError)
+                quota_exhausted = "429" in message or "RESOURCE_EXHAUSTED" in message
+                transient = quota_exhausted or any(
+                    code in message for code in ("500", "502", "503", "504", "UNAVAILABLE")
+                )
+                malformed = isinstance(error, (ModelError, ValidationError))
                 if not attempt and (transient or malformed):
                     if transient:
                         # Do not hammer a quota-exhausted provider or hide requests in SDK retries.
-                        if "429" in message or "RESOURCE_EXHAUSTED" in message:
-                            raise ModelError("Model quota exhausted; saved a partial result. Retry after quota resets") from error
-                        yield {"type": "progress", "stage": stage, "message": "Provider temporarily unavailable; retrying once"}
+                        if quota_exhausted:
+                            raise ModelError(
+                                "Model quota exhausted; saved a partial result. Retry after quota resets"
+                            ) from error
+                        yield {
+                            "type": "progress",
+                            "stage": stage,
+                            "message": "Provider temporarily unavailable; retrying once",
+                        }
                         time.sleep(min(2, budget.remaining()))
                     else:
-                        messages.append(HumanMessage(content="Return a complete valid response matching the requested schema."))
+                        messages.append(
+                            HumanMessage(
+                                content=f"Schema rejection: {message[:500]}. Return a complete valid response matching the requested schema."
+                            )
+                        )
                     continue
-                raise ModelError(f"{type(error).__name__}: {message[:500]}") from error
-        raise ModelError("Model did not produce a usable response")
+                raise ModelError(message[:500]) from error

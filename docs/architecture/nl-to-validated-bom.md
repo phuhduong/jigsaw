@@ -1,11 +1,16 @@
 # Jigsaw backend architecture
 
-**Status:** authoritative implementation design  
+**Status:** superseded historical proposal — not an implementation requirement
 **Date:** 2026-09-13  
 **Scope:** a free, local-first, single-user side project that compiles natural-language embedded-system requirements into an evidence-backed pre-layout logical design and exact engineering BOM (EBOM) inside a deliberately supported design family  
 **Supersedes:** the earlier multi-agent/DigiKey pipeline and the earlier proposal that made KiCad generation part of the core acceptance predicate
 
 ## 1. Executive decision
+
+This proposal was not adopted. Its design packs, wiring/netlist requirements and release
+gates do not apply to the current backend. See [the practical BOM workflow](practical-bom-workflow.md)
+and [backend guide](../../backend/README.md) for the implemented architecture.
+The remainder is preserved as a record of the earlier discussion, not active guidance.
 
 Jigsaw is a **bounded design compiler**, not a collection of LLM agents, a catalog search assistant, or a PCB-layout system.
 

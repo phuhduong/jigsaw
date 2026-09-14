@@ -25,7 +25,7 @@ export class DigiKeyServer {
 
     // Register tools
     registerDigiKeyTools(this.server, this.digikeyClient);
-    console.log('DigiKey MCP Server initialized with tools registered');
+    console.error('DigiKey MCP Server initialized with tools registered');
   }
 
   getServer(): McpServer {

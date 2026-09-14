@@ -1,21 +1,28 @@
 """Saved design and structured stage responses. One instance per physical placement."""
+
 from __future__ import annotations
+
 from datetime import datetime, timezone
 from typing import Any, Literal
 from uuid import uuid4
+
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic.json_schema import SkipJsonSchema
+
 
 def now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
+
 class Record(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+
 
 class PurchasingOptions(Record):
     board_quantity: int = Field(default=1, ge=1, le=10000, strict=True)
     region: str = Field(default="US", pattern=r"^[A-Z]{2}$")
     currency: str = Field(default="USD", pattern=r"^[A-Z]{3}$")
+
 
 class Requirement(Record):
     id: str
@@ -23,9 +30,11 @@ class Requirement(Record):
     description: str
     component_ids: list[str] = Field(default_factory=list)
 
+
 class Assumption(Record):
     id: str
     description: str
+
 
 class Question(Record):
     id: str
@@ -33,9 +42,11 @@ class Question(Record):
     question: str
     guidance: str = ""
 
+
 class PriceBreak(Record):
     quantity: int = Field(ge=1)
     unit_price: float = Field(ge=0)
+
 
 class Offer(BaseModel):
     model_config = ConfigDict(extra="ignore", allow_inf_nan=False)
@@ -51,6 +62,7 @@ class Offer(BaseModel):
     price_breaks: list[PriceBreak] = Field(default_factory=list)
     retrieved_at: str
 
+
 class Product(BaseModel):
     model_config = ConfigDict(extra="ignore")
     manufacturer: str
@@ -63,6 +75,7 @@ class Product(BaseModel):
     offers: list[Offer] = Field(default_factory=list)
     retrieved_at: str
 
+
 class ComponentSpec(Record):
     id: str = Field(description="Unique placement ID, e.g. U1, U2, C1; never just a category")
     name: str
@@ -70,76 +83,157 @@ class ComponentSpec(Record):
     purpose: str
     search_query: str = Field(description="Prefer a known exact MPN, otherwise short capability/value query")
     broad_query: str = ""
-    requirement_ids: list[str] = Field(default_factory=list)
     support_for: list[str] = Field(default_factory=list)
-    document_urls: list[str] = Field(default_factory=list, description="Manufacturer guide URL hints; fetched before use")
+    document_urls: list[str] = Field(
+        default_factory=list, description="Manufacturer guide URL hints; fetched before use"
+    )
+
 
 class Component(ComponentSpec):
+    # Read historical snapshots without sending the redundant inverse mapping to models.
+    requirement_ids: SkipJsonSchema[list[str]] = Field(default_factory=list, exclude=True)
     product: Product | None = None
     selection_reason: str = ""
     selection_error: str | None = None
     document_ids: list[str] = Field(default_factory=list)
     document_errors: list[str] = Field(default_factory=list)
 
+
 class Evidence(Record):
     id: str
     component_ids: list[str]
     document_id: str
     page: int = Field(ge=1, description="Original physical page; HTML page 1")
-    kind: Literal["text", "figure"]
-    quote: str = Field(description="Exact source excerpt for text; figure label for figure observations")
+    kind: Literal["text", "figure"] = Field(
+        description="text: verbatim narrative or supplied HTML text. figure: ALL visual PDF tables, charts, diagrams and schematics."
+    )
+    quote: str = Field(
+        description=(
+            "For text, a short exact source excerpt (at most 12 words). For figure, the visible table/figure "
+            "title or label. Never reconstruct a multi-column row or rewrite wording/units as a quotation."
+        )
+    )
     fact: str
     conditions: str = ""
+
 
 class Quantity(Record):
     value: float
     unit: str = Field(description="V, mV, A, mA, uA, W, mW, degC, degC/W, ohm, Hz or kHz as appropriate")
     basis: Literal["min", "max", "typical", "nominal", "estimate", "absolute_maximum"]
-    evidence_ids: list[str] = Field(default_factory=list, description="Cite the Evidence IDs containing THIS parameter/relationship, not a generic pinout. Required for device ratings. Every non-null quantity needs these or an explicit assumption_id.")
-    assumption_id: str | None = Field(default=None, description="ID of a declared supply/load/thermal design assumption, never a substitute for documented device operating limits")
+    evidence_ids: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Cite the Evidence IDs containing THIS parameter/relationship, not a generic pinout. Required for "
+            "device ratings. Every non-null quantity needs these or an explicit assumption_id."
+        ),
+    )
+    assumption_id: str | None = Field(
+        default=None,
+        description=(
+            "ID of a declared supply/load/thermal design assumption, never a substitute for documented device "
+            "operating limits"
+        ),
+    )
+
 
 # Legacy wiring fields remain readable but are omitted from new schemas and reports.
 class PowerLoad(Record):
     component_id: str
     pin: SkipJsonSchema[str] = Field(default="", exclude=True)
-    voltage_min: Quantity | None = Field(default=None, description="Receiving component_id's recommended minimum input voltage, not the proposed rail voltage. A linear-regulator input requirement may be derived from cited output MAX plus documented headroom/dropout, while preserving any separate VIN minimum/UVLO restriction. Cite the underlying source observations even if the calculated value is not printed literally; an assumption alone is insufficient.")
-    voltage_max: Quantity | None = Field(default=None, description="Receiving component_id's documented recommended operating MAXIMUM supply voltage. Cite that receiver's source, never copy the proposed rail's delivered voltage.")
-    current: Quantity | None = Field(default=None, description="Peak/design load on this supply. For a converter input, derive downstream demand plus losses/own current in a declared assumption; do not relabel a downstream device rating as the converter's.")
+    voltage_min: Quantity | None = Field(
+        default=None,
+        description=(
+            "Receiving component_id's recommended minimum input voltage, not the proposed rail voltage. A "
+            "linear-regulator input requirement may be derived from cited output MAX plus documented "
+            "headroom/dropout, while preserving any separate VIN minimum/UVLO restriction. Cite the "
+            "underlying source observations even if the calculated value is not printed literally; an "
+            "assumption alone is insufficient."
+        ),
+    )
+    voltage_max: Quantity | None = Field(
+        default=None,
+        description=(
+            "Receiving component_id's documented recommended operating MAXIMUM supply voltage. Cite that "
+            "receiver's source, never copy the proposed rail's delivered voltage."
+        ),
+    )
+    current: Quantity | None = Field(
+        default=None,
+        description=(
+            "Peak/design load on this supply. For a converter input, derive downstream demand plus losses/own "
+            "current in a declared assumption; do not relabel a downstream device rating as the converter's."
+        ),
+    )
+
 
 class Rail(Record):
     id: str
     source_component_id: str = Field(description="Selected component ID, or external for an explicitly assumed supply")
     source_pin: SkipJsonSchema[str] = Field(default="", exclude=True)
     description: str
-    voltage_min: Quantity | None = Field(default=None, description="Source's lowest delivered voltage under the intended input/load conditions, including relevant output tolerance and load/line regulation; not the receiver's operating minimum.")
-    voltage_max: Quantity | None = Field(default=None, description="Source's highest delivered voltage under the intended input/load conditions, including relevant output tolerance and load/line regulation; not the receiver's operating maximum.")
+    voltage_min: Quantity | None = Field(
+        default=None,
+        description=(
+            "Source's lowest delivered voltage under the intended input/load conditions, including relevant "
+            "output tolerance and load/line regulation; not the receiver's operating minimum."
+        ),
+    )
+    voltage_max: Quantity | None = Field(
+        default=None,
+        description=(
+            "Source's highest delivered voltage under the intended input/load conditions, including relevant "
+            "output tolerance and load/line regulation; not the receiver's operating maximum."
+        ),
+    )
     available_current: Quantity | None = None
     loads: list[PowerLoad] = Field(default_factory=list)
     evidence_ids: list[str] = Field(default_factory=list)
+
 
 class Endpoint(Record):
     component_id: str
     pins: SkipJsonSchema[list[str]] = Field(default_factory=list, exclude=True)
     address: str | None = None
-    assumption_id: str | None = Field(default=None, description="For component_id='external', the declared off-board tool/interface assumption")
+    assumption_id: str | None = Field(
+        default=None, description="For component_id='external', the declared off-board tool/interface assumption"
+    )
+
 
 class Interface(Record):
     id: str
     protocol: str
     endpoints: list[Endpoint]
-    configuration: str = Field(description="Protocol roles, rate and operating assumptions relevant to BOM compatibility; no pin mapping")
-    evidence_ids: list[str] = Field(default_factory=list, description="Source observations supporting the shared protocol/resources. A current source-backed signals review naming this interface can also establish this; numeric signal limits are checked separately.")
+    configuration: str = Field(
+        description="Protocol roles, rate and operating assumptions relevant to BOM compatibility; no pin mapping"
+    )
+    evidence_ids: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Source observations supporting the shared protocol/resources. A current source-backed signals "
+            "review naming this interface can also establish this; numeric signal limits are checked "
+            "separately."
+        ),
+    )
+
 
 class SignalCheck(Record):
     id: str
     source_component_id: str
     receiver_component_id: str
     description: str
-    pullup_rail_id: str | None = Field(default=None, description="For an open-drain line, derive its static high level from this recorded pull-up rail; leave output_high_min null. Pullup connections and rise time still require review.")
+    pullup_rail_id: str | None = Field(
+        default=None,
+        description=(
+            "For an open-drain line, derive its static high level from this recorded pull-up rail; leave "
+            "output_high_min null. Pullup connections and rise time still require review."
+        ),
+    )
     output_high_min: Quantity | None = None
     input_high_min: Quantity | None = None
     output_low_max: Quantity | None = None
     input_low_max: Quantity | None = None
+
 
 class RegulatorCheck(Record):
     component_id: str
@@ -147,21 +241,57 @@ class RegulatorCheck(Record):
     input_rail_id: str
     output_rail_id: str
     dropout: Quantity | None = None
-    dissipation_limit: SkipJsonSchema[Quantity | None] = None  # Historical claim; not used to approve new checks.
-    ambient_max: Quantity | None = Field(default=None, description="Maximum ambient temperature in degC for this operating configuration; declare the environmental assumption.")
-    junction_target: Quantity | None = Field(default=None, description="Conservative design junction-temperature target in degC, below the device limit; declare the design assumption, not an invented device rating.")
-    theta_ja: Quantity | None = Field(default=None, description="Selected package's documented junction-to-ambient thermal resistance in degC/W; cite its source and state applicable board/copper conditions. Documented typical values are estimates, not certified board performance.")
-    average_output_current: Quantity | None = Field(default=None, description="Optional total sustained/average output load for thermal screening only, supported by applicable current evidence or an explicit workload/duty-cycle assumption. Must not exceed the recorded peak output-load sum. Leave null to use peak loads conservatively; never reduce rail peak loads to obtain a thermal pass.")
+    # Historical scalar is readable, but never exported or used for thermal approval.
+    dissipation_limit: SkipJsonSchema[Quantity | None] = Field(default=None, exclude=True)
+    ambient_max: Quantity | None = Field(
+        default=None,
+        description=(
+            "Maximum ambient temperature in degC for this operating configuration; declare the environmental "
+            "assumption."
+        ),
+    )
+    junction_target: Quantity | None = Field(
+        default=None,
+        description=(
+            "Conservative design junction-temperature target in degC, below the device limit; declare the "
+            "design assumption, not an invented device rating."
+        ),
+    )
+    theta_ja: Quantity | None = Field(
+        default=None,
+        description=(
+            "Selected package's documented junction-to-ambient thermal resistance in degC/W; cite its source "
+            "and state applicable board/copper conditions. Documented typical values are estimates, not "
+            "certified board performance."
+        ),
+    )
+    average_output_current: Quantity | None = Field(
+        default=None,
+        description=(
+            "Optional total sustained/average output load for thermal screening only, supported by applicable "
+            "current evidence or an explicit workload/duty-cycle assumption. Must not exceed the recorded "
+            "peak output-load sum. Leave null to use peak loads conservatively; never reduce rail peak loads "
+            "to obtain a thermal pass."
+        ),
+    )
+
 
 class SourceSupportNeed(Record):
-    """Source-owned external support requirement, separate from circuit fulfillment."""
+    """Source-owned external support requirement, separate from BOM fulfillment."""
+
     id: str
     purpose: str
     parent_ids: list[str]
     necessity: Literal["required", "recommended"]
-    connection_requirement: str = Field(default="", description="Functional support specification: required values, quantities and operating conditions; no pin mapping")
+    connection_requirement: str = Field(
+        default="",
+        description=(
+            "Functional support specification: required values, quantities and operating conditions; no pin mapping"
+        ),
+    )
     evidence_ids: list[str]
-    document_id: str | None = None
+    document_id: SkipJsonSchema[str | None] = None
+
 
 class SupportNeed(Record):
     id: str
@@ -169,14 +299,17 @@ class SupportNeed(Record):
     parent_ids: list[str]
     necessity: Literal["required", "recommended", "optional"]
     status: Literal["satisfied", "included", "not_applicable", "unresolved"] = Field(
-        description="satisfied: selected external component_ids fulfill this need; included: already internal to the purchased parent; not_applicable: explicitly justified omission; unresolved: still missing")
+        description="satisfied: selected external component_ids fulfill this need; included: already internal to the purchased parent; not_applicable: explicitly justified omission; unresolved: still missing"
+    )
     component_ids: list[str] = Field(default_factory=list)
     connections: str = Field(default="", description="Optional purpose/operating arrangement; no pin mapping")
     evidence_ids: list[str]
     explanation: str = ""
 
+
 Area = Literal["requirements", "power", "signals", "support", "evidence"]
 REVIEW_AREAS = ("requirements", "power", "signals", "support", "evidence")
+
 
 class Finding(Record):
     id: str
@@ -191,6 +324,7 @@ class Finding(Record):
     explanation: str
     remedy: str = ""
 
+
 class Usage(Record):
     model_calls: int = 0
     input_tokens: int = 0
@@ -200,6 +334,7 @@ class Usage(Record):
     pdf_pages: int = 0
     correction_rounds: int = 0
     elapsed_seconds: float = 0
+
 
 class Limits(Record):
     seconds: int = 480
@@ -212,6 +347,7 @@ class Limits(Record):
     functional_blocks: int = 8
     bom_rows: int = 40
     correction_rounds: int = 2
+
 
 class DesignRun(Record):
     schema_version: int = 1
@@ -227,7 +363,7 @@ class DesignRun(Record):
     terminal_reason: str = ""
     model: str = ""
     model_configuration: dict[str, str] = Field(default_factory=dict)
-    prompt_version: str = "18"
+    prompt_version: str = "27"
     original_request: str
     modification: str | None = None
     options: PurchasingOptions = Field(default_factory=PurchasingOptions)
@@ -251,6 +387,13 @@ class DesignRun(Record):
     usage: Usage = Field(default_factory=Usage)
     limits: Limits = Field(default_factory=Limits)
 
+    def invalidate_review(self) -> None:
+        """Any design change needs a fresh whole-BOM review."""
+        self.review_completed = False
+        self.findings = []
+        self.compatibility = "incomplete"
+
+
 class Plan(Record):
     summary: str
     requirements: list[Requirement]
@@ -259,36 +402,55 @@ class Plan(Record):
     configuration_notes: list[str]
     pending_questions: list[Question] = Field(default_factory=list)
 
+
 class Pick(Record):
     component_id: str
     chosen_index: int = Field(ge=-1)
     reason: str
 
+
 class Picks(Record):
     picks: list[Pick]
+
 
 class PageSelection(Record):
     document_id: str
     pages: list[int]
     reason: str
 
+
 class DocumentRequest(Record):
     component_id: str
     url: str
     reason: str
 
+
 class ReadingPlan(Record):
     selections: list[PageSelection]
     document_requests: list[DocumentRequest] = Field(default_factory=list)
 
+
 class EvidencePacket(Record):
-    applicability: dict[str, str] = Field(description="One entry per applicable selected component ID, explaining the exact manufacturer/variant or general circuit guidance match. Omit a component when this source does not establish applicability; explain the gap in missing_facts.")
+    applicability: dict[str, str] = Field(
+        description="One entry per applicable selected component ID, explaining the exact manufacturer/variant or general circuit guidance match. Omit a component when this source does not establish applicability; explain the gap in missing_facts."
+    )
     evidence: list[Evidence]
-    source_support_needs: list[SourceSupportNeed] = Field(default_factory=list, description="Applicable required/recommended EXTERNAL support. Already-internal module circuitry is an evidence fact, not an external obligation.")
-    missing_facts: list[str] = Field(default_factory=list, description="Concrete needed facts not established by these pages, not hypothetical future concerns")
+    source_support_needs: list[SourceSupportNeed] = Field(
+        default_factory=list,
+        description=(
+            "Applicable required/recommended EXTERNAL support. Already-internal module circuitry is an "
+            "evidence fact, not an external obligation."
+        ),
+    )
+    missing_facts: list[str] = Field(
+        default_factory=list,
+        description="Concrete needed facts not established by these pages, not hypothetical future concerns",
+    )
+
 
 class CircuitProposal(Record):
     """Engineering update: models cannot write product identities or supplier offers."""
+
     additional_components: list[ComponentSpec]
     support_needs: list[SupportNeed]
     rails: list[Rail]
@@ -298,45 +460,57 @@ class CircuitProposal(Record):
     assumptions: list[Assumption]
     configuration_notes: list[str]
 
-class DesignProposal(CircuitProposal):
-    """Validated source observations joined with the circuit proposal."""
-    evidence: list[Evidence]
 
 class Review(Record):
     findings: list[Finding]
     additional_pages: list[PageSelection] = Field(default_factory=list)
     document_requests: list[DocumentRequest] = Field(default_factory=list)
 
-    @model_validator(mode="after")
-    def complete_coverage(self):
-        missing = set(REVIEW_AREAS) - {finding.area for finding in self.findings if finding.kind == "check"}
-        if missing and not self.additional_pages and not self.document_requests:
-            raise ValueError("Final review needs check findings for: " + ", ".join(sorted(missing)))
-        return self
 
 class Correction(Record):
     reason: str
     replace_components: list[ComponentSpec] = Field(default_factory=list)
     add_components: list[ComponentSpec] = Field(default_factory=list)
     remove_component_ids: list[str] = Field(default_factory=list)
-    requirement_components: dict[str, list[str]] = Field(default_factory=dict,
-        description="Repair component-ID mappings for existing requirements only; preserve requirement text")
-    reread_component_ids: list[str] = Field(default_factory=list,
-        description="Components whose source needs a missing or corrected fact, even on already-read pages; state the needed fact in configuration_instructions")
-    configuration: CircuitProposal | None = Field(default=None,
-        description="Complete replacement compatibility record using unchanged selected parts and current evidence; no additional_components, part changes or source rereads")
+    requirement_components: dict[str, list[str]] = Field(
+        default_factory=dict,
+        description="Repair component-ID mappings for existing requirements only; preserve requirement text",
+    )
+    reread_component_ids: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Components whose source needs a missing or corrected fact, even on already-read pages; state the "
+            "needed fact in configuration_instructions"
+        ),
+    )
+    configuration: CircuitProposal | None = Field(
+        default=None,
+        description=(
+            "Complete replacement compatibility record using unchanged selected parts and current evidence; "
+            "no additional_components, part changes or source rereads"
+        ),
+    )
     configuration_instructions: str = ""
 
     @model_validator(mode="after")
-    def direct_configuration_requires_unchanged_parts(self):
-        if self.configuration is not None and (self.replace_components or self.add_components
-                or self.remove_component_ids or self.reread_component_ids or self.configuration.additional_components):
-            raise ValueError("Direct configuration cannot include part changes, source rereads, or additional components")
+    def assert_direct_configuration_mode(self):
+        if self.configuration is not None and (
+            self.replace_components
+            or self.add_components
+            or self.remove_component_ids
+            or self.reread_component_ids
+            or self.configuration.additional_components
+        ):
+            raise ValueError(
+                "Direct configuration cannot include part changes, source rereads, or additional components"
+            )
         return self
+
 
 class AnalysisRequest(Record):
     query: str = Field(min_length=1, max_length=10000)
     options: PurchasingOptions = Field(default_factory=PurchasingOptions)
+
 
 class RefinementRequest(Record):
     base_run_id: str = Field(pattern=r"^[a-f0-9]{32}$")
@@ -344,55 +518,9 @@ class RefinementRequest(Record):
     answers: dict[str, str] | None = None
 
     @model_validator(mode="after")
-    def one_instruction(self):
+    def assert_one_instruction(self):
         if (self.modification is None) == (self.answers is None):
             raise ValueError("Provide exactly one of modification or answers")
         if self.answers is not None and (not self.answers or any(not a.strip() for a in self.answers.values())):
             raise ValueError("Answers must be nonempty")
         return self
-
-
-def product_context(product, quantity=1):
-    """Keep catalog engineering fields, not every packaging price tier, in model prompts."""
-    if isinstance(product, Product):
-        product = product.model_dump()
-    result = {k: product.get(k) for k in ("manufacturer", "mpn", "package", "description", "parameters", "datasheet_url", "product_url", "retrieved_at")}
-    result["parameters"] = [item for item in result.get("parameters") or []
-                            if item.get("value") is not None and str(item["value"]).strip().lower() not in {"", "-", "n/a"}]
-    result["offers"] = []
-    for offer in product.get("offers", []):
-        order = max(quantity, offer.get("moq") or 1)
-        tiers = [p for p in offer.get("price_breaks", []) if p["quantity"] <= order]
-        price = max(tiers, key=lambda p: p["quantity"])["unit_price"] if tiers else None
-        result["offers"].append({"sku": offer["sku"], "stock": offer.get("stock"), "moq": offer.get("moq"),
-                                 "currency": offer.get("currency"), "unit_price": price})
-    return result
-
-
-def design_context(run):
-    """A projection for reasoning, never another authoritative design state."""
-    result = run.model_dump(include={"original_request", "modification", "revision", "summary", "requirements", "assumptions",
-        "components", "evidence", "evidence_errors", "source_support_needs", "support_needs", "rails", "interfaces", "signal_checks",
-        "regulator_checks", "configuration_notes", "findings", "pending_questions"})
-    # Successful checks repeat facts already present below. Keep actionable gaps
-    # in reasoning context; the full saved report still retains every finding.
-    result["findings"] = [finding for finding in result["findings"]
-                          if finding["revision"] == run.revision and finding["kind"] == "check"
-                          and finding["status"] in {"fail", "unknown"}]
-    for component in result["components"]:
-        component.pop("selection_reason", None)
-        for key in ("selection_error", "document_errors"):
-            if not component.get(key):
-                component.pop(key, None)
-        if component["product"]:
-            component["product"] = product_context(component["product"], run.options.board_quantity)
-            # Selected-offer totals already appear in purchasing_bom. Candidate
-            # selection still receives offers through product_context directly.
-            component["product"].pop("offers", None)
-            component["product"].pop("retrieved_at", None)
-    from run_store import bom_rows
-    result["purchasing_options"] = run.options.model_dump()
-    result["purchasing_bom"] = [{key: row[key] for key in (
-        "reference_ids", "required_quantity", "order_quantity", "unit_price",
-        "extended_price", "currency", "availability")} for row in bom_rows(run)]
-    return result

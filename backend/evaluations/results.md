@@ -8,6 +8,116 @@ free-tier quota, or engineering-reliability claim follows from these runs.
 
 ## BOM-only scope implementation and verification
 
+### Backend cleanup verification (2026-09-14)
+
+The [cleanup review](cleanup-review.md) records the code/state/test changes and the
+preserved architecture. Local verification passes: 69 backend tests, three MCP tests,
+both TypeScript builds, frontend typecheck, lint/format checks, and saved-result replay.
+The prior accepted `149dc533` BOM still produces identical checks and purchasing rows.
+**Prompt 27 produced a fresh independently accepted unattended BOM under its saved
+operating assumptions.** Earlier failures, including a falsely checked result, remain below;
+this is not a measured reliability rate or approval of every model explanation.
+
+Every trial below used only the original sensor query, Gemini 3.5 Flash-Lite with
+provider-default thinking, no parent/manual component or page hints, and unchanged limits.
+
+| Prompt / run | Calls; input / output tokens; seconds | Result and reason |
+|---|---|---|
+| 19 / `6a8325fc8b074137add0be47fa2767c3` | 19; 265645 / 31977; 134.70 | Incomplete/partial: protected source reference unresolved; final review input allowance exhausted. Actual support and USB-current accounting also need repair. |
+| 20 / `a0c328a76097449bae4358e50b2226e9` | 15; 179664 / 19815; 102.28 | Error/issues_found/available: two malformed review responses. Exact UMW regulator stability with selected ceramic output support remains unestablished. |
+| 21 / `0a11e3c9e0f04a2584c8a1c0a65a2669` | 17; 269250 / 30388; 153.36 | Issues_found/available: model's thermal repair made the inequality worse; final review allowance exhausted. Parts are plausible, but the saved target fails. |
+| 22 / `f91b8de5cdbd4546b1264acc79a38e6d` | 12; 135439 / 17522; 86.85 | Error/incomplete/partial: direct configuration rejected because C1 remained unselected. The 300mA regulator was also wrongly approved for an acknowledged 379mA radio peak. |
+| 22 repeat / `aa819051ce8d4800b120ebadebba7fed` | 6; 43885 / 9417; 33.53 | Error/incomplete: provider HTTP 429 during extraction; no completed BOM. The four selected primary parts have offers, not a fully sourced finished design. |
+| 23 / `8796184336204f5eadc183425f2398e5` | 18; 182342 / 25031; 113.97 | Incomplete/available: unsupported controller input limits remain. Independent review found a plausible integrated board, but its chip datasheet was misused as board-output evidence and an unnecessary separate USB-C entry has only one CC resistor. |
+| 23 repeat / `f05aee806a5849009d378ceeb655dee7` | 17; 207534 / 26297; 110.79 | Checked/available, **rejected independently**: a single C1 is assigned to both regulator input and output, and UMW regulator stability with the selected ceramic support is unestablished. This is a model-review false positive. |
+| 24 / `94cafa44ca164db68825516680e5a11e` | 18; 249622 / 31476; 131.34 | Incomplete/available: invalid model finding references and an unresolved external-programming interface record remain. Separate regulator capacitors are appropriate, but independent review again finds only one external USB-C termination resistor. |
+| 25 / `9942971798e04514be96af41ccd88624` | 17; 268932 / 31279; 122.11 | Issues_found/available: both USB-C terminations and separate regulator capacitors are present, but saved thermal loss exceeds its allowance. One valid source quotation was rejected because the model mistyped its document ID. |
+| 26 / `c08ce0ca501347e98b646f2073fa1749` | 17; 245724 / 30683; 117.80 | Incomplete/available: source identity is correct, but model table-text quotations were rejected and corrections left device limits uncited. Independent review still finds unestablished UMW ceramic-output suitability and inaccurate module-support accounting. |
+| 27 / `29c85ccd86234aedb40010b7ce754d16` | 14; 190458 / 23118; 104.95 | Checked/available, **accepted independently under saved assumptions**: 15 placements / 12 MPNs, $9.76. Separate support parts, both CC terminations and exact regulator ceramic/thermal suitability verified. Nonblocking model-record errors remain explicitly documented. |
+
+See the [independent original-source audit](cleanup-source-audit.md) for calibrated
+part/configuration findings. None of these records was manually repaired. Local SSE
+recordings are `data/evaluations/prompt19-cleanup-events.jsonl`, `prompt20-cleanup-events.jsonl`,
+`prompt21-cleanup-events.jsonl`, `prompt22-cleanup-events.jsonl`, and
+`prompt22-cleanup-repeat-events.jsonl`. Saved/GET/JSON/CSV/SSE purchasing rows, findings and
+outcomes agree for these five trials and the accepted baseline.
+Both subsequent prompt-23 recordings (`prompt23-cleanup-events.jsonl` and
+`prompt23-cleanup-repeat-events.jsonl`) have exact terminal-SSE/saved/GET/JSON equality
+and matching CSV purchasing quantities. Their code findings also match `da37c00` exactly;
+the false-positive review is not explained by a weakened or changed arithmetic gate.
+
+Broad prompt shortening was backed out: prompt 22 restored the baseline's detailed
+stage wording in one module, sharing assembly rules with correction. Concrete cleanup
+fixes retained include candidate order-cost consistency, numeric microfarad glyph matching,
+actionable redacted schema retry feedback, and keeping semantic review-coverage checks in
+one code path instead of rejecting useful partial findings at schema parsing. The terminal
+SSE path no longer resaves the same error snapshot and changes its timestamp after emission.
+
+One tiny quota diagnostic after the last trial also returned HTTP 429. The provider named
+`GenerateRequestsPerDayPerProjectPerModel-FreeTier`, model `gemini-3.5-flash-lite`, quota
+value **500**. This is exhausted daily request quota, not just an inferred transient failure.
+Calls stopped until the midnight-Pacific daily reset. A tiny same-model diagnostic then
+returned HTTP 200 and live verification resumed. Prompt 23 excludes direct configuration
+from the correction schema while a selection is missing, routing that demonstrated invalid
+response through existing bounded schema recovery. No stronger model, paid fallback or
+extra budget was used. At that point fresh positive acceptance remained open; preserving
+the historical positive case was not a substitute for that verification. The two prompt-23
+post-reset trials finished without quota errors. Model interpretation/review accuracy,
+not credentials or current quota availability, remained the limitation. No further instruction was added for the
+capacitor double allocation: the existing assembly prompt already forbids that exact behavior.
+
+Prompt 24 makes one navigation-only change: the existing page-preview matcher recognizes
+functional-description and input/output-capacitor text. In the UMW source, this surfaces the
+explicit output-capacitor requirement instead of only the paragraph's tail. The original page
+was already requestable; this improves discoverability, not proof that previewing caused
+the missed requirement. No prompt, electrical check, reading budget or retry was expanded.
+That trial has exact terminal-SSE/saved/GET/JSON equality (73 ordered events) and 11 matching
+CSV purchase rows. Its original snapshot was not changed.
+
+Prompt 25 replaces the existing USB source lead with Espressif's short manufacturer
+[USB-C guide](https://docs.espressif.com/projects/esp-iot-solution/en/latest/usb/usb_overview/usb_typec_hardware_guide.html).
+The prior forum's singular-resistor discussion was ambiguous about physical quantity.
+The replacement explicitly distinguishes device/sink support, resistor values, and default
+versus advertised current. Both root and independent review read the complete guide; the
+existing downloader exposes its relevant prose. It remains general guidance, not an exact
+connector rating. No prescribed part list, automatic electrical rule or additional source
+allowance was added. The TI primer was considered but not used because it omits the numeric
+termination value.
+
+Prompt 26 removes that unnecessary ID-transcription task: the existing single-source
+extraction schema supplies the caller's document ID and hides it from model generation.
+An explicitly conflicting ID is still rejected; saved evidence retains the ID and the
+existing quote/page/owner checks remain intact. Source-support document IDs likewise stay
+caller-owned. A short local omission/conflict/persistence regression covers the behavior.
+The broader correction-mode restriction considered during diagnosis was deferred in favor
+of removing this demonstrated failure at its origin. No additional retry was introduced.
+The live provider accepted the simplified schema, and saved evidence retained correct document
+IDs. The prompt-26 terminal stream/saved/GET/JSON snapshots match exactly (69 ordered events;
+10 CSV purchase rows). Final read-only comparison of all 42 terminal saved runs produced
+identical baseline/current code findings. This does not turn the failed live trial into an
+accepted engineering result: the model still omitted relevant source material and misclassified
+visual table observations.
+
+Prompt 27 moved existing text-versus-visual quotation instructions into the evidence field
+descriptions and removed their duplicate extraction-prompt wording. Regulator reading now
+explicitly includes application/component-selection prose about capacitor type and stability,
+not just the electrical table and reference circuit. No source is automatically accepted or
+read, and no reading/retry budget or electrical check changed.
+
+The fresh run completed checked/available with no rejected observations. Independent source
+review accepts its actual selected parts under the saved 150mA sustained load and 50°C ambient:
+the exact SOT-223 regulator, ceramic support and source-based thermal estimate are compatible.
+This does not endorse the model's inaccurate peak-current number, output-envelope decimals,
+duplicate resistor interpretation or contradictory reviewer thermal explanation. Those errors
+are retained explicitly in the audit; correcting their explanations requires no different
+parts or operating conditions. No saved record was manually repaired.
+
+Final read-only replay of all 43 terminal records gives identical code findings, purchasing
+rows, CSV and derived outcomes versus `da37c00`. Prompt 27's 66 ordered SSE events terminate
+in a snapshot identical to saved/GET/JSON output, and HTTP CSV matches the exported record
+byte-for-byte. The scoped cleanup acceptance is complete. General model reliability is not
+qualified by this success, and the earlier false-positive checked result remains a failure.
+
 ### Current autonomous-completion goal (2026-09-14)
 
 The user clarified that a manually guided/source-audited BOM does not satisfy the

@@ -1,4 +1,5 @@
 """Atomic local run snapshots and BOM projections; no separate purchasing state."""
+
 from __future__ import annotations
 
 import csv
@@ -12,7 +13,7 @@ import tempfile
 from pathlib import Path
 from urllib.parse import urlparse
 
-from models import DesignRun, now
+from models import DesignRun, Product, now
 
 _RUN_ID = re.compile(r"^[a-f0-9]{32}$")
 
@@ -33,8 +34,9 @@ class RunStore:
         data = DesignRun.model_validate(run.model_dump()).model_dump_json(indent=2)
         temporary = None
         try:
-            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=self.root,
-                                             prefix=f".{run.id}-", suffix=".tmp", delete=False) as handle:
+            with tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", dir=self.root, prefix=f".{run.id}-", suffix=".tmp", delete=False
+            ) as handle:
                 temporary = Path(handle.name)
                 handle.write(data)
                 handle.flush()
@@ -57,9 +59,14 @@ class RunStore:
                 run = self.load(path.stem)
                 if run.lifecycle == "running":
                     run.lifecycle = "interrupted"
-                    run.compatibility = "issues_found" if any(
-                        f.revision == run.revision and f.kind == "check" and f.status == "fail"
-                        for f in run.findings) else "incomplete"
+                    run.compatibility = (
+                        "issues_found"
+                        if any(
+                            f.revision == run.revision and f.kind == "check" and f.status == "fail"
+                            for f in run.findings
+                        )
+                        else "incomplete"
+                    )
                     run.review_completed = False
                     run.terminal_reason = "The backend restarted before this run finished."
                     self.save(run)
@@ -69,13 +76,20 @@ class RunStore:
         return count
 
 
-def _url(value: str | None) -> str | None:
+def _http_url(value: str | None) -> str | None:
     parsed = urlparse(value or "")
     return value if parsed.scheme in {"http", "https"} and parsed.netloc else None
 
 
-def _custom_reel(offer) -> bool:
+def _is_custom_reel(offer) -> bool:
     return bool(offer and "digi-reel" in (offer.packaging or "").casefold())
+
+
+def _order_quantity(required, moq, multiple):
+    quantity = max(required, moq or 1)
+    if multiple:
+        quantity = math.ceil(quantity / multiple) * multiple
+    return quantity
 
 
 def bom_rows(run: DesignRun) -> list[dict]:
@@ -90,53 +104,116 @@ def bom_rows(run: DesignRun) -> list[dict]:
     for placements in groups.values():
         product = placements[0].product
         demand = len(placements) * run.options.board_quantity
-        offers = {offer.sku: offer for placement in placements for offer in placement.product.offers
-                  if offer.region == run.options.region and offer.currency == run.options.currency}
+        offers = {
+            offer.sku: offer
+            for placement in placements
+            for offer in placement.product.offers
+            if offer.region == run.options.region and offer.currency == run.options.currency
+        }
         options = []
         for offer in offers.values():
-            quantity = max(demand, offer.moq or 1)
-            if offer.order_multiple is not None:
-                quantity = math.ceil(quantity / offer.order_multiple) * offer.order_multiple
+            quantity = _order_quantity(demand, offer.moq, offer.order_multiple)
             tiers = [tier for tier in offer.price_breaks if tier.quantity <= quantity]
             price = max(tiers, key=lambda tier: tier.quantity).unit_price if tiers else None
-            url = _url(offer.url) or _url(product.product_url)
+            url = _http_url(offer.url) or _http_url(product.product_url)
             available = bool(url and price is not None and offer.stock is not None and offer.stock >= quantity)
-            options.append((available, price * quantity if price is not None else float("inf"), offer, quantity, price, url))
+            options.append(
+                {
+                    "available": available,
+                    "total": price * quantity if price is not None else float("inf"),
+                    "offer": offer,
+                    "quantity": quantity,
+                    "price": price,
+                    "url": url,
+                }
+            )
         # Custom reeling may add an unquoted setup fee. Ordinary Tape & Reel is
         # not custom reeling; retain the existing total-price ranking otherwise.
-        chosen = min(options, key=lambda item: (not item[0], item[0] and _custom_reel(item[2]), item[1], item[2].sku)) if options else None
-        offer, quantity, price, url = chosen[2:] if chosen else (None, demand, None, _url(product.product_url))
-        availability = "available" if chosen and chosen[0] else "out_of_stock" if offer and offer.stock is not None and offer.stock < quantity else "unknown"
-        notes = ["Order multiple not provided; confirm at checkout."] if not offer or offer.order_multiple is None else []
-        if _custom_reel(offer):
+        offer, quantity, price, url = None, demand, None, _http_url(product.product_url)
+        availability = "unknown"
+        if options:
+            chosen = min(
+                options,
+                key=lambda choice: (
+                    not choice["available"],
+                    choice["available"] and _is_custom_reel(choice["offer"]),
+                    choice["total"],
+                    choice["offer"].sku,
+                ),
+            )
+            offer = chosen["offer"]
+            quantity, price, url = chosen["quantity"], chosen["price"], chosen["url"]
+            if chosen["available"]:
+                availability = "available"
+            elif offer.stock is not None and offer.stock < quantity:
+                availability = "out_of_stock"
+        notes = (
+            ["Order multiple not provided; confirm at checkout."] if not offer or offer.order_multiple is None else []
+        )
+        if _is_custom_reel(offer):
             notes.append("Quoted component prices exclude any custom-reeling/setup fee; confirm the total at checkout.")
-        rows.append({
-            "reference_ids": [component.id for component in placements],
-            "purposes": [component.purpose for component in placements],
-            "manufacturer": product.manufacturer, "mpn": product.mpn, "package": product.package,
-            "installed_quantity": len(placements), "board_quantity": run.options.board_quantity,
-            "required_quantity": demand, "order_quantity": quantity,
-            "unit_price": price, "extended_price": round(price * quantity, 6) if price is not None else None,
-            "currency": run.options.currency, "supplier_sku": offer.sku if offer else None,
-            "purchase_url": url, "datasheet_url": _url(product.datasheet_url),
-            "stock": offer.stock if offer else None, "moq": offer.moq if offer else None,
-            "order_multiple": offer.order_multiple if offer else None,
-            "ordering_note": " ".join(notes),
-            "retrieved_at": offer.retrieved_at if offer else product.retrieved_at,
-            "availability": availability, "review_status": run.compatibility,
-        })
+        rows.append(
+            {
+                "reference_ids": [component.id for component in placements],
+                "purposes": [component.purpose for component in placements],
+                "manufacturer": product.manufacturer,
+                "mpn": product.mpn,
+                "package": product.package,
+                "installed_quantity": len(placements),
+                "board_quantity": run.options.board_quantity,
+                "required_quantity": demand,
+                "order_quantity": quantity,
+                "unit_price": price,
+                "extended_price": round(price * quantity, 6) if price is not None else None,
+                "currency": run.options.currency,
+                "supplier_sku": offer.sku if offer else None,
+                "purchase_url": url,
+                "datasheet_url": _http_url(product.datasheet_url),
+                "stock": offer.stock if offer else None,
+                "moq": offer.moq if offer else None,
+                "order_multiple": offer.order_multiple if offer else None,
+                "ordering_note": " ".join(notes),
+                "retrieved_at": offer.retrieved_at if offer else product.retrieved_at,
+                "availability": availability,
+                "review_status": run.compatibility,
+            }
+        )
     return rows
 
 
+def run_snapshot(run: DesignRun) -> dict:
+    return {**run.model_dump(mode="json"), "bom": bom_rows(run)}
+
+
 def export_json(run: DesignRun) -> str:
-    return json.dumps({**run.model_dump(mode="json"), "bom": bom_rows(run)}, indent=2, ensure_ascii=False)
+    return json.dumps(run_snapshot(run), indent=2, ensure_ascii=False)
 
 
 def export_csv(run: DesignRun) -> str:
-    columns = ["reference_ids", "purposes", "manufacturer", "mpn", "package", "installed_quantity",
-               "board_quantity", "required_quantity", "order_quantity", "unit_price", "extended_price",
-               "currency", "supplier_sku", "purchase_url", "datasheet_url", "stock", "moq",
-               "order_multiple", "ordering_note", "retrieved_at", "availability", "review_status"]
+    columns = [
+        "reference_ids",
+        "purposes",
+        "manufacturer",
+        "mpn",
+        "package",
+        "installed_quantity",
+        "board_quantity",
+        "required_quantity",
+        "order_quantity",
+        "unit_price",
+        "extended_price",
+        "currency",
+        "supplier_sku",
+        "purchase_url",
+        "datasheet_url",
+        "stock",
+        "moq",
+        "order_multiple",
+        "ordering_note",
+        "retrieved_at",
+        "availability",
+        "review_status",
+    ]
     output = io.StringIO(newline="")
     writer = csv.DictWriter(output, fieldnames=columns, quoting=csv.QUOTE_ALL)
     writer.writeheader()
@@ -150,3 +227,109 @@ def export_csv(run: DesignRun) -> str:
             escaped[key] = value
         writer.writerow(escaped)
     return output.getvalue()
+
+
+def product_context(product, quantity=1):
+    """Keep catalog engineering fields, not every packaging price tier, in model prompts."""
+    if isinstance(product, Product):
+        product = product.model_dump()
+    result = {
+        k: product.get(k)
+        for k in (
+            "manufacturer",
+            "mpn",
+            "package",
+            "description",
+            "parameters",
+            "datasheet_url",
+            "product_url",
+            "retrieved_at",
+        )
+    }
+    result["parameters"] = [
+        item
+        for item in result.get("parameters") or []
+        if item.get("value") is not None and str(item["value"]).strip().lower() not in {"", "-", "n/a"}
+    ]
+    result["offers"] = []
+    for offer in product.get("offers", []):
+        order = _order_quantity(quantity, offer.get("moq"), offer.get("order_multiple"))
+        tiers = [p for p in offer.get("price_breaks", []) if p["quantity"] <= order]
+        price = max(tiers, key=lambda p: p["quantity"])["unit_price"] if tiers else None
+        result["offers"].append(
+            {
+                "sku": offer["sku"],
+                "stock": offer.get("stock"),
+                "moq": offer.get("moq"),
+                "order_multiple": offer.get("order_multiple"),
+                "currency": offer.get("currency"),
+                "packaging": offer.get("packaging"),
+                "order_quantity": order,
+                "unit_price": price,
+                "extended_price": round(price * order, 6) if price is not None else None,
+            }
+        )
+    return result
+
+
+def design_context(run):
+    """A projection for reasoning, never another authoritative design state."""
+    result = run.model_dump(
+        include={
+            "original_request",
+            "modification",
+            "revision",
+            "summary",
+            "requirements",
+            "assumptions",
+            "components",
+            "evidence",
+            "evidence_errors",
+            "source_support_needs",
+            "support_needs",
+            "rails",
+            "interfaces",
+            "signal_checks",
+            "regulator_checks",
+            "configuration_notes",
+            "findings",
+            "pending_questions",
+        }
+    )
+    # Successful checks repeat facts already present below. Keep actionable gaps
+    # in reasoning context; the full saved report still retains every finding.
+    result["findings"] = [
+        finding
+        for finding in result["findings"]
+        if finding["revision"] == run.revision
+        and finding["kind"] == "check"
+        and finding["status"] in {"fail", "unknown"}
+    ]
+    for component in result["components"]:
+        component.pop("selection_reason", None)
+        for key in ("selection_error", "document_errors"):
+            if not component.get(key):
+                component.pop(key, None)
+        if component["product"]:
+            component["product"] = product_context(component["product"], run.options.board_quantity)
+            # Selected-offer totals already appear in purchasing_bom. Candidate
+            # selection still receives offers through product_context directly.
+            component["product"].pop("offers", None)
+            component["product"].pop("retrieved_at", None)
+    result["purchasing_options"] = run.options.model_dump()
+    result["purchasing_bom"] = [
+        {
+            key: row[key]
+            for key in (
+                "reference_ids",
+                "required_quantity",
+                "order_quantity",
+                "unit_price",
+                "extended_price",
+                "currency",
+                "availability",
+            )
+        }
+        for row in bom_rows(run)
+    ]
+    return result
