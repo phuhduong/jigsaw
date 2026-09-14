@@ -1,167 +1,209 @@
-"""
-Jigsaw Backend — Flask server for PCB component analysis.
-Uses a 3-agent LangChain pipeline with LangSmith tracing.
-"""
-
+"""Local/private single-process API. Progress streams; consistent snapshots are saved."""
+from __future__ import annotations
 import json
 import logging
 import os
-import uuid
-from flask import Flask, request, jsonify, Response, stream_with_context
-from flask_cors import CORS
+from pathlib import Path
+from threading import Lock
+
 from dotenv import load_dotenv
-from pipeline import stream_component_analysis, stream_refinement, get_chat_response
+load_dotenv(Path(__file__).with_name(".env"))
 
-load_dotenv()
+from flask import Flask, Response, jsonify, request, stream_with_context
+from flask_cors import CORS
+from pydantic import ValidationError
 
-logging.basicConfig(level=logging.INFO)
+from documents import DocumentStore
+from models import AnalysisRequest, DesignRun, RefinementRequest, Usage, now
+from pipeline import Workflow
+from run_store import RunStore, bom_rows, export_csv, export_json
 
-app = Flask(__name__)
-CORS(app)
-
-PORT = int(os.getenv("PORT", "3001"))
-
-# In-memory conversation state: {queryId: {query, messages, status}}
-query_state: dict[str, dict] = {}
-
-
-def _detect_context_request(text: str) -> bool:
-    """Detect if the model is asking for more information."""
-    text_lower = text.lower()
-    has_question = "?" in text
-    short_response = len(text.split()) < 60
-    asking_patterns = [
-        "what is", "what are", "can you tell", "please provide",
-        "could you", "i need", "more information", "additional",
-    ]
-    matches_pattern = any(p in text_lower for p in asking_patterns)
-    return has_question and (matches_pattern or short_response)
+logger = logging.getLogger(__name__)
 
 
-@app.route("/api/query", methods=["POST"])
-def mcp_query():
-    """Handle initial chat query."""
-    data = request.get_json()
-    if not data or "query" not in data:
-        return jsonify({"error": "Missing 'query' field"}), 400
+def create_app(store=None, workflow=None):
+    app = Flask(__name__)
+    app.config["MAX_CONTENT_LENGTH"] = 65536
+    CORS(app, origins=[os.getenv("FRONTEND_ORIGIN", "http://localhost:5173")])
+    data = Path(os.getenv("DATA_DIR", str(Path(__file__).parent / "data")))
+    store = store or RunStore(data / "runs")
+    workflow = workflow or Workflow(DocumentStore(data / "documents"))
+    store.interrupt_unfinished()
+    admission = Lock()
+    app.extensions.update(run_store=store, workflow=workflow, admission=admission)
 
-    query = data["query"]
-    query_id = f"query_{uuid.uuid4().hex[:12]}"
+    def snapshot(run):
+        return {**run.model_dump(mode="json"), "bom": bom_rows(run)}
 
-    try:
-        response_text = get_chat_response(query)
+    def start(run):
+        if not admission.acquire(blocking=False):
+            return jsonify(error="Another design run is active; retry when it finishes"), 409
+        released = False
 
-        query_state[query_id] = {
-            "query": query,
-            "messages": [
-                {"role": "user", "content": query},
-                {"role": "assistant", "content": response_text},
-            ],
-            "status": "active",
-        }
-
-        if _detect_context_request(response_text):
-            return jsonify({"type": "context_request", "queryId": query_id, "message": response_text}), 200
-        return jsonify({"type": "response", "message": response_text}), 200
-
-    except Exception as e:
-        app.logger.error(f"Error in /api/query: {e}")
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/api/continue", methods=["POST"])
-def mcp_continue():
-    """Continue conversation with additional context."""
-    data = request.get_json()
-    if not data or "context" not in data or "queryId" not in data:
-        return jsonify({"error": "Missing 'context' or 'queryId' field"}), 400
-
-    context = data["context"]
-    query_id = data["queryId"]
-
-    if query_id not in query_state:
-        return jsonify({"error": "Query ID not found"}), 404
-
-    state = query_state[query_id]
-
-    try:
-        response_text = get_chat_response(context, state["messages"])
-
-        state["messages"].append({"role": "user", "content": context})
-        state["messages"].append({"role": "assistant", "content": response_text})
-
-        if _detect_context_request(response_text):
-            return jsonify({"type": "context_request", "queryId": query_id, "message": response_text}), 200
-        return jsonify({"type": "response", "message": response_text}), 200
-
-    except Exception as e:
-        app.logger.error(f"Error in /api/continue: {e}")
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/api/component-analysis", methods=["POST"])
-def mcp_component_analysis():
-    """Stream component analysis via Server-Sent Events."""
-    data = request.get_json()
-    if not data or "query" not in data:
-        return jsonify({"error": "Missing 'query' field"}), 400
-
-    query = data["query"]
-    context = data.get("context")
-
-    def generate():
+        def release():
+            nonlocal released
+            if not released:
+                released = True
+                admission.release()
         try:
-            for event in stream_component_analysis(query, context):
-                yield f"data: {json.dumps(event)}\n\n"
-        except Exception as e:
-            app.logger.error(f"Streaming error: {e}")
-            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+            store.save(run)
+        except Exception:
+            release()
+            logger.exception("Could not save initial run")
+            return jsonify(error="Could not save the initial run"), 500
 
-    return Response(
-        stream_with_context(generate()),
-        mimetype="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
-    )
+        def generate():
+            sequence = 0
+            iterator = None
+            terminal_sent = False
 
+            def event(kind, **fields):
+                nonlocal sequence
+                sequence += 1
+                return "data: " + json.dumps({"type": kind, "run_id": run.id, "sequence": sequence, **fields}) + "\n\n"
 
-@app.route("/api/refine", methods=["POST"])
-def mcp_refine():
-    """Stream component refinement via Server-Sent Events."""
-    data = request.get_json()
-    if not data or "modification" not in data:
-        return jsonify({"error": "Missing 'modification' field"}), 400
+            try:
+                yield event("started", snapshot=snapshot(run))
+                iterator = workflow.execute(run)
+                for item in iterator:
+                    kind = item["type"]
+                    fields = {k: v for k, v in item.items() if k != "type"}
+                    if kind in {"snapshot", "complete", "error"}:
+                        store.save(run)
+                        fields["snapshot"] = snapshot(run)
+                    if kind in {"complete", "error"}:
+                        terminal_sent = True
+                    yield event(kind, **fields)
+                if not terminal_sent:
+                    store.save(run)
+                    terminal_sent = True
+                    yield event("error" if run.lifecycle == "error" else "complete",
+                                message=run.terminal_reason, snapshot=snapshot(run))
+            except GeneratorExit:
+                if iterator is not None:
+                    iterator.close()
+                if not terminal_sent:
+                    run.lifecycle, run.compatibility = "interrupted", "incomplete"
+                    run.review_completed = False
+                    run.terminal_reason = "Client disconnected; no automatic background continuation"
+                raise
+            except Exception:
+                logger.exception("Run could not finish or persist")
+                run.lifecycle, run.compatibility = "error", "incomplete"
+                run.review_completed = False
+                run.terminal_reason = "Run failed while executing or saving; retrieve the last saved snapshot"
+                try:
+                    store.save(run)
+                except Exception:
+                    logger.exception("Failed to save terminal error")
+                terminal_sent = True
+                yield event("error", message=run.terminal_reason, snapshot=snapshot(run))
+            finally:
+                try:
+                    if iterator is not None:
+                        iterator.close()
+                    if run.lifecycle in {"interrupted", "error"}:
+                        run.updated_at = now()
+                        store.save(run)
+                except Exception:
+                    logger.exception("Final snapshot unavailable")
+                finally:
+                    release()
 
-    modification = data["modification"]
-    current_components = data.get("current_components", [])
-    project_summary = data.get("project_summary", "")
+        response = Response(stream_with_context(generate()), mimetype="text/event-stream", headers={
+            "Cache-Control": "no-cache", "X-Accel-Buffering": "no",
+            "X-Run-Id": run.id,
+        })
+        # Also release when a response is closed without starting its generator.
+        def closed():
+            if not released:
+                run.lifecycle, run.compatibility = "interrupted", "incomplete"
+                run.review_completed = False
+                run.terminal_reason = "Response closed before completion"
+                try:
+                    store.save(run)
+                finally:
+                    release()
+        response.call_on_close(closed)
+        return response
 
-    def generate():
+    @app.errorhandler(ValidationError)
+    def invalid(error):
+        return jsonify(error="Invalid request", details=[
+            {"field": ".".join(str(x) for x in e["loc"]), "message": e["msg"]}
+            for e in error.errors(include_input=False)
+        ]), 400
+
+    @app.post("/api/component-analysis")
+    def analyze():
+        body = AnalysisRequest.model_validate(request.get_json(silent=True) or {})
+        if not body.query.strip():
+            return jsonify(error="Query must not be blank"), 400
+        return start(DesignRun(original_request=body.query.strip(), options=body.options))
+
+    @app.post("/api/refine")
+    def refine():
+        body = RefinementRequest.model_validate(request.get_json(silent=True) or {})
         try:
-            for event in stream_refinement(modification, current_components, project_summary):
-                yield f"data: {json.dumps(event)}\n\n"
-        except Exception as e:
-            app.logger.error(f"Refinement streaming error: {e}")
-            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+            base = store.load(body.base_run_id)
+        except FileNotFoundError:
+            return jsonify(error="Base run not found"), 404
+        if base.lifecycle == "running":
+            return jsonify(error="The base run is still running"), 409
+        modification = body.modification
+        if body.answers is not None:
+            questions = {q.id: q for q in base.pending_questions}
+            if set(body.answers) != set(questions):
+                return jsonify(error="Answers must match all pending question IDs on the base run"), 400
+            modification = "\n".join(f"{questions[key].question}\nAnswer: {value}" for key, value in body.answers.items())
+        if not modification or not modification.strip():
+            return jsonify(error="Modification must not be blank"), 400
+        run = base.model_copy(deep=True)
+        fresh = DesignRun(original_request=base.original_request)
+        run.id, run.created_at, run.updated_at = fresh.id, fresh.created_at, fresh.updated_at
+        run.prompt_version = fresh.prompt_version
+        run.parent_run_id, run.modification = base.id, modification
+        run.revision += 1
+        run.lifecycle, run.compatibility, run.stage = "running", "incomplete", "started"
+        run.review_completed, run.terminal_reason = False, ""
+        run.pending_questions, run.findings, run.usage = [], [], Usage()
+        return start(run)
 
-    return Response(
-        stream_with_context(generate()),
-        mimetype="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
-    )
+    @app.get("/api/runs/<run_id>")
+    def get_run(run_id):
+        try:
+            return jsonify(snapshot(store.load(run_id)))
+        except (FileNotFoundError, ValueError):
+            return jsonify(error="Run not found"), 404
+
+    @app.get("/api/runs/<run_id>/export")
+    def export_run(run_id):
+        try:
+            run = store.load(run_id)
+        except (FileNotFoundError, ValueError):
+            return jsonify(error="Run not found"), 404
+        format_ = request.args.get("format", "csv")
+        if format_ not in {"csv", "json"}:
+            return jsonify(error="Export format must be csv or json"), 400
+        content = export_csv(run) if format_ == "csv" else export_json(run)
+        return Response(content, mimetype="text/csv" if format_ == "csv" else "application/json",
+                        headers={"Content-Disposition": f'attachment; filename="jigsaw-{run.id}-r{run.revision}.{format_}"'})
+
+    @app.post("/api/query")
+    @app.post("/api/continue")
+    def retired_chat():
+        return jsonify(error="Use /api/component-analysis or /api/refine with a saved run ID"), 410
+
+    @app.get("/health")
+    def health():
+        return jsonify(status="healthy", busy=admission.locked())
+
+    return app
 
 
-@app.route("/health", methods=["GET"])
-def health():
-    return jsonify({"status": "healthy"}), 200
-
+app = create_app()
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=PORT, debug=True)
+    logging.basicConfig(level=logging.INFO)
+    app.run(host="127.0.0.1", port=int(os.getenv("PORT", "3001")),
+            threaded=True, debug=False, use_reloader=False)

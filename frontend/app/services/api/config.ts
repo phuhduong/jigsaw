@@ -11,8 +11,8 @@ export const API_CONFIG = {
   get useMock(): boolean {
     const envVal = getEnv("VITE_USE_MOCK");
     if (envVal !== undefined) return envVal === "true";
-    // Default to mock if no backend URL is configured
-    return !getEnv("VITE_BACKEND_URL");
+    // The design flow uses the real local backend unless demo mode is explicit.
+    return false;
   },
   get baseUrl(): string {
     return getEnv("VITE_BACKEND_URL") || "http://localhost:3001";

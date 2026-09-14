@@ -1,510 +1,181 @@
-import { useState, useEffect, useRef } from "react";
-import { motion } from "motion/react";
-import { ArrowLeft, Pencil, Check, X } from "lucide-react";
-import { Button } from "../components/ui/button";
-import { Input } from "../components/ui/input";
-import ComponentGraph from "./ComponentGraph";
-import type { ComponentGraphRef } from "./ComponentGraph";
-import PCBViewer from "./PCBViewer";
-import PartsList from "./PartsList";
-import type { PartObject } from "../services/api";
-import { componentAnalysisApi } from "../services/api";
-import type { ComponentAnalysisResponse } from "../services/api/componentAnalysisApi";
-import Chat from "./Chat";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
+import { ArrowLeft, Loader2, Square, RefreshCw } from "lucide-react";
+import { Button } from "../components/ui/button";
+import { Textarea } from "../components/ui/textarea";
+import { Card } from "../components/ui/card";
+import { API_CONFIG } from "../services/api/config";
+import { getSavedRun, safeUrl, streamRun } from "../services/api/designRunApi";
+import type { DesignSnapshot, RunRequest } from "../services/api/designRunApi";
+import PartsList from "./PartsList";
 
-interface DesignInterfaceProps {
-  initialQuery?: string;
-}
+const compatibilityLabels = { checked: "Compatibility checked", issues_found: "Compatibility issues found", incomplete: "Compatibility review incomplete" };
 
-export default function DesignInterface({
-  initialQuery = "",
-}: DesignInterfaceProps) {
+export default function DesignInterface({ initialQuery = "" }: { initialQuery?: string }) {
   const navigate = useNavigate();
+  const [snapshot, setSnapshot] = useState<DesignSnapshot | null>(null);
+  const [query, setQuery] = useState(initialQuery);
+  const [modification, setModification] = useState("");
+  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const controller = useRef<AbortController | null>(null);
+  const generation = useRef(0);
+  const activeRunId = useRef<string | null>(null);
 
-  // Project name state with localStorage persistence
-  const [projectName, setProjectName] = useState(() => {
-    const saved = localStorage.getItem("jigsaw-project-name");
-    return saved || "Untitled PCB Design";
-  });
-  const [isEditingName, setIsEditingName] = useState(false);
-  const [nameInput, setNameInput] = useState(projectName);
-  const nameInputRef = useRef<HTMLInputElement>(null);
-  const componentGraphRef = useRef<ComponentGraphRef>(null);
-
-  // Save project name to localStorage whenever it changes
-  useEffect(() => {
-    localStorage.setItem("jigsaw-project-name", projectName);
-  }, [projectName]);
-
-  // Focus input when editing starts
-  useEffect(() => {
-    if (isEditingName && nameInputRef.current) {
-      nameInputRef.current.focus();
-      nameInputRef.current.select();
-    }
-  }, [isEditingName]);
-
-  const handleNameEdit = () => {
-    setIsEditingName(true);
-    setNameInput(projectName);
-  };
-
-  const handleNameSave = () => {
-    const trimmed = nameInput.trim();
-    if (trimmed) {
-      setProjectName(trimmed);
-    } else {
-      setNameInput(projectName); // Reset if empty
-    }
-    setIsEditingName(false);
-  };
-
-  const handleNameCancel = () => {
-    setNameInput(projectName);
-    setIsEditingName(false);
-  };
-
-  const handleNameKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter") {
-      handleNameSave();
-    } else if (e.key === "Escape") {
-      handleNameCancel();
-    }
-  };
-
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [isAnalysisPaused, setIsAnalysisPaused] = useState(false);
-  const [analysisQuery, setAnalysisQuery] = useState<string>(initialQuery);
-  const [parts, setParts] = useState<PartObject[]>([]);
-  const [selectedComponents, setSelectedComponents] = useState<
-    Map<
-      string,
-      {
-        id: string;
-        label: string;
-        position: { x: number; y: number };
-        color?: string;
-        size?: { w: number; h: number };
-        partData?: PartObject;
+  const run = useCallback(async (request: RunRequest, externalController?: AbortController) => {
+    controller.current?.abort();
+    const current = externalController ?? new AbortController();
+    controller.current = current;
+    const ticket = ++generation.current;
+    activeRunId.current = null;
+    let sequence = 0;
+    setBusy(true);
+    setError(null);
+    setAnswers({});
+    setProgress("Starting design analysis…");
+    if ("query" in request) setSnapshot(null);
+    try {
+      await streamRun(request, event => {
+        if (generation.current !== ticket) return;
+        if (activeRunId.current && activeRunId.current !== event.run_id) return;
+        if (event.sequence <= sequence) return;
+        activeRunId.current = event.run_id;
+        sequence = event.sequence;
+        if (event.snapshot) setSnapshot(event.snapshot);
+        if (event.message || event.stage) setProgress(event.message || event.stage!.replaceAll("_", " "));
+        if (event.type === "error") setError(event.message || event.snapshot?.terminal_reason || "Analysis could not finish.");
+      }, current.signal);
+      if (generation.current === ticket) setModification("");
+    } catch (failure) {
+      if (generation.current === ticket) setError(failure instanceof Error ? failure.message : "Analysis could not finish.");
+    } finally {
+      if (generation.current === ticket) {
+        setBusy(false);
+        controller.current = null;
       }
-    >
-  >(new Map());
+    }
+  }, []);
 
-  // Track previous query to detect new queries
-  const previousQueryRef = useRef<string>("");
-
-  // Update query when initialQuery changes and auto-start analysis
   useEffect(() => {
-    if (
-      initialQuery &&
-      initialQuery.trim() &&
-      initialQuery !== previousQueryRef.current
-    ) {
-      // Reset for new query from landing page
-      setParts([]);
-      setSelectedComponents(new Map());
-      previousQueryRef.current = initialQuery;
-      setAnalysisQuery(initialQuery);
-      setIsAnalyzing(true);
-      setIsAnalysisPaused(false);
-    }
-  }, [initialQuery]);
+    const initial = new AbortController();
+    // Cleanup can cancel a development remount before it starts a duplicate run.
+    if (initialQuery.trim()) queueMicrotask(() => { if (!initial.signal.aborted) void run({ query: initialQuery }, initial); });
+    return () => { initial.abort(); controller.current?.abort(); generation.current += 1; };
+  }, [initialQuery, run]);
 
-  // Track the highest hierarchy level to append new components
-  const highestHierarchyRef = useRef<number>(-1);
-
-  // Handle query sent from chat - start analysis
-  const handleQuerySent = (query: string) => {
-    // Always append new components to existing ones (don't reset)
-    // Only reset if this is the very first query ever
-    if (previousQueryRef.current === "") {
-      // First query ever - start fresh
-      setParts([]);
-      setSelectedComponents(new Map());
-      highestHierarchyRef.current = -1;
-    }
-    // Otherwise, keep existing components and parts, append new ones at bottom
-    previousQueryRef.current = query;
-    setAnalysisQuery(query);
-    setIsAnalyzing(true);
-    setIsAnalysisPaused(false);
-  };
-
-  const [contextQueryId, setContextQueryId] = useState<string | null>(null);
-  const [contextMessage, setContextMessage] = useState<string>("");
-
-  // Handle context requested from component analysis - pause analysis
-  const handleAnalysisContextRequested = (queryId: string, message: string) => {
-    setIsAnalysisPaused(true);
-    setContextQueryId(queryId);
-    setContextMessage(message);
-    // Also show in chat
-    // ComponentGraph will handle pausing via the isAnalyzing prop
-  };
-
-  // Handle context provided - resume analysis
-  const handleAnalysisContextProvided = (context: string, queryId: string) => {
-    // Clear context state and resume
-    setContextQueryId(null);
-    setContextMessage("");
-    setIsAnalysisPaused(false);
-    // ComponentGraph will detect contextQueryId cleared and resume
-    // Ensure analysis continues with the same query
-    if (analysisQuery) {
-      setIsAnalyzing(true);
+  const reload = async () => {
+    const id = activeRunId.current ?? snapshot?.id;
+    if (!id) return;
+    const ticket = generation.current;
+    try {
+      const saved = await getSavedRun(id);
+      if (generation.current !== ticket) return;
+      setSnapshot(saved);
+      setError(null);
+      setProgress(saved.lifecycle === "running" ? "The backend is finishing its current operation. Reload again shortly." : saved.terminal_reason);
+    } catch (failure) {
+      if (generation.current === ticket) setError(failure instanceof Error ? failure.message : "Could not retrieve the saved run.");
     }
   };
 
-  // Handle context provided from chat - also resume component analysis if it's waiting
-  const handleChatContextProvided = () => {
-    // If component analysis is waiting for context, provide it
-    if (contextQueryId) {
-      handleAnalysisContextProvided("Context from chat", contextQueryId);
-    }
-    setIsAnalysisPaused(false);
-    if (analysisQuery) {
-      setIsAnalyzing(true);
-    }
-  };
-
-  // Handle context requested from chat - pause analysis
-  const handleChatContextRequested = () => {
-    setIsAnalysisPaused(true);
-    // ComponentGraph will handle pausing via the isAnalyzing prop
-  };
-
-  // Handle query killed - reset everything
-  const handleQueryKilled = () => {
-    // Stop analysis
-    setIsAnalyzing(false);
-    setIsAnalysisPaused(false);
-    setAnalysisComplete(false);
-
-    // Reset all state
-    setParts([]);
-    setSelectedComponents(new Map());
-    setAnalysisQuery("");
-    setContextQueryId(null);
-    setContextMessage("");
-    highestHierarchyRef.current = -1;
-    previousQueryRef.current = "";
-
-    // ComponentGraph will stop and abort when isAnalyzing becomes false
-    // The abort controller will be cleaned up in ComponentGraph's useEffect
-  };
-
-  // Layout system for organized PCB placement
-  const calculateComponentPosition = (
-    componentId: string,
-    existingComponents: Array<{
-      id: string;
-      position: { x: number; y: number };
-      size?: { w: number; h: number };
-    }>,
-    hierarchyLevel: number
-  ): { x: number; y: number } => {
-    // Define component types and their preferred positions
-    const componentTypes: Record<string, { row: number; col: number }> = {
-      mcu: { row: 1, col: 2 }, // Center
-      power: { row: 0, col: 2 }, // Top center
-      connector: { row: 0, col: 1 }, // Top left
-      sensors: { row: 1, col: 0 }, // Left
-      memory: { row: 1, col: 4 }, // Right
-      antenna: { row: 0, col: 3 }, // Top right
-      passives: { row: 2, col: 2 }, // Bottom center
-    };
-
-    // Grid spacing - responsive based on viewport
-    const viewportWidth =
-      typeof window !== "undefined" ? window.innerWidth : 1920;
-    const viewportHeight =
-      typeof window !== "undefined" ? window.innerHeight : 1080;
-    const gridSpacing = Math.max(60, Math.min(100, viewportWidth * 0.08)); // 8% of viewport width, clamped
-    const startX = Math.max(150, viewportWidth * 0.15); // 15% of viewport width, minimum 150
-    const startY = Math.max(100, viewportHeight * 0.15); // 15% of viewport height, minimum 100
-
-    // Get component type (lowercase for matching)
-    const type = componentId.toLowerCase();
-    const layout = componentTypes[type];
-
-    if (layout) {
-      // Use predefined layout position
-      return {
-        x: startX + layout.col * gridSpacing,
-        y: startY + layout.row * gridSpacing,
-      };
-    }
-
-    // For unknown components, place them in a grid pattern
-    const existingCount = existingComponents.length;
-    const colsPerRow = 4;
-    const row = Math.floor(existingCount / colsPerRow);
-    const col = existingCount % colsPerRow;
-
-    return {
-      x: startX + col * gridSpacing,
-      y: startY + (row + 3) * gridSpacing, // Start from row 3 for unknown components
-    };
-  };
-
-  const handleComponentSelected = (
-    componentId: string,
-    partData: any,
-    position?: { x: number; y: number },
-    hierarchyOffset?: number
-  ) => {
-    // Add to parts list (append to bottom)
-    setParts((prev) => {
-      // Check if part already exists (by MPN)
-      const existingIndex = prev.findIndex((p) => p.mpn === partData.mpn);
-      if (existingIndex >= 0) {
-        // Part already exists, don't add it again - just keep existing quantity
-        return prev;
-      }
-      // Add new part at the end
-      return [...prev, { ...partData, quantity: partData.quantity || 1 }];
-    });
-
-    // Add to PCB viewer with organized grid layout
-    setSelectedComponents((prev) => {
-      const newMap = new Map(prev);
-      const existingComponents = Array.from(prev.values()).map((c) => ({
-        id: c.id,
-        position: c.position,
-        size: c.size,
-      }));
-
-      // Calculate organized position based on component type and existing layout
-      const organizedPosition = calculateComponentPosition(
-        componentId,
-        existingComponents,
-        hierarchyOffset || 0
-      );
-
-      newMap.set(componentId, {
-        id: componentId,
-        label: partData.mpn.split("-")[0] || componentId, // Use first part of MPN as label
-        position: organizedPosition,
-        partData, // Include part data for connection logic
-      });
-      return newMap;
-    });
-  };
-
-  const [analysisComplete, setAnalysisComplete] = useState(false);
-  const [isRefining, setIsRefining] = useState(false);
-
-  const handleAnalysisComplete = () => {
-    setIsAnalyzing(false);
-    setAnalysisComplete(true);
-  };
-
-  // Handle refinement request from chat
-  const handleRefinementSent = (modification: string) => {
-    // Do NOT set isAnalyzing — that would trigger ComponentGraph to start a full re-analysis.
-    // Refinement is handled directly here via the API.
-    setIsRefining(true);
-
-    // Build current component list from selectedComponents
-    const currentComponents = Array.from(selectedComponents.values()).map((c) => ({
-      component_id: c.id,
-      component_name: c.label,
-      part_data: c.partData || {},
-    }));
-
-    const projectSummary = previousQueryRef.current || analysisQuery || "";
-
-    componentAnalysisApi.startRefinement(
-      modification,
-      currentComponents,
-      projectSummary,
-      (update: ComponentAnalysisResponse) => {
-        // Push every event to ComponentGraph so the left panel updates
-        componentGraphRef.current?.processRefinementEvent(update);
-
-        if (update.type === "remove" && update.componentId) {
-          // Remove from parts list using the component's current partData
-          setSelectedComponents((prev) => {
-            const component = prev.get(update.componentId!);
-            if (component?.partData) {
-              setParts((prevParts) => prevParts.filter((p) => p.mpn !== component.partData!.mpn));
-            }
-            const newMap = new Map(prev);
-            newMap.delete(update.componentId!);
-            return newMap;
-          });
-        } else if (update.type === "selection" && update.componentId && update.partData) {
-          // Remove old part for this component_id before adding the new one
-          setSelectedComponents((prev) => {
-            const existing = prev.get(update.componentId!);
-            if (existing?.partData) {
-              setParts((prevParts) => prevParts.filter((p) => p.mpn !== existing.partData!.mpn));
-            }
-            return prev;
-          });
-          // Add the new component
-          handleComponentSelected(
-            update.componentId,
-            update.partData,
-            undefined,
-            0,
-          );
-        } else if (update.type === "complete") {
-          setAnalysisComplete(true);
-          setIsRefining(false);
-        } else if (update.type === "error") {
-          setIsRefining(false);
-        }
-      },
-    );
-  };
+  const canRefine = snapshot && snapshot.lifecycle !== "running" && !busy;
+  const findings = snapshot?.findings.filter(item => item.revision === snapshot.revision) ?? [];
+  const outstanding = findings.filter(item => item.kind === "check" && ["fail", "unknown"].includes(item.status));
+  const lifecycle = snapshot?.lifecycle.replaceAll("_", " ");
 
   return (
-    <div className="h-screen bg-zinc-950 text-white flex flex-col overflow-hidden">
-      {/* Header */}
-      <header className="flex-shrink-0 border-b border-zinc-800 bg-zinc-900/50 backdrop-blur-sm">
-        <div className="px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => navigate("/")}
-              className="text-zinc-400 hover:text-white">
-              <ArrowLeft className="w-4 h-4 mr-2" />
-              Back
-            </Button>
-            <div className="h-4 w-px bg-zinc-700"></div>
-            {isEditingName ? (
-              <div className="flex items-center gap-2">
-                <Input
-                  ref={nameInputRef}
-                  value={nameInput}
-                  onChange={(e) => setNameInput(e.target.value)}
-                  onKeyDown={handleNameKeyDown}
-                  onBlur={handleNameSave}
-                  className="h-8 w-64 bg-zinc-800 border-zinc-700 text-white text-xl px-3"
-                  maxLength={50}
-                />
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={handleNameSave}
-                  className="h-8 w-8 p-0 text-emerald-400 hover:text-emerald-300"
-                  title="Save">
-                  <Check className="w-4 h-4" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={handleNameCancel}
-                  className="h-8 w-8 p-0 text-zinc-400 hover:text-zinc-300"
-                  title="Cancel">
-                  <X className="w-4 h-4" />
-                </Button>
-              </div>
-            ) : (
-              <div
-                className="group flex items-center gap-2 cursor-pointer hover:bg-zinc-800/50 rounded px-2 py-1 transition-colors"
-                onClick={handleNameEdit}
-                title="Click to rename project">
-                <h1 className="text-xl text-white">{projectName}</h1>
-                <Pencil className="w-4 h-4 text-zinc-500 opacity-0 group-hover:opacity-100 transition-opacity" />
-              </div>
-            )}
-          </div>
-
-          <div className="flex items-center gap-4">
-            {isAnalyzing && !isAnalysisPaused && (
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className="flex items-center gap-2 text-sm text-emerald-400">
-                <div className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse"></div>
-                AI Analyzing Components...
-              </motion.div>
-            )}
-            {isAnalysisPaused && (
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className="flex items-center gap-2 text-sm text-amber-400">
-                <div className="w-2 h-2 bg-amber-400 rounded-full animate-pulse"></div>
-                Analysis Paused - Awaiting Context
-              </motion.div>
-            )}
-          </div>
+    <div className="min-h-screen bg-zinc-950 text-white">
+      <header className="border-b border-zinc-800 bg-zinc-900/50 px-6 py-4 flex items-center justify-between gap-4">
+        <div className="flex items-center gap-4">
+          <Button variant="ghost" onClick={() => navigate("/")} className="text-zinc-400"><ArrowLeft className="w-4 h-4" /> Back</Button>
+          <h1 className="text-xl">Jigsaw <span className="text-zinc-500 text-sm ml-2">Pre-layout BOM</span></h1>
         </div>
+        {snapshot && <span className="text-xs text-zinc-500">Revision {snapshot.revision} · {lifecycle}</span>}
       </header>
 
-      {/* Main Content */}
-      <div className="flex-1 flex overflow-hidden min-h-0">
-        {/* Left Panel - Component Graph */}
-        <motion.div
-          initial={{ x: -20, opacity: 0 }}
-          animate={{ x: 0, opacity: 1 }}
-          transition={{ duration: 0.5 }}
-          className="w-[20vw] min-w-[280px] max-w-[400px] border-r border-zinc-800 bg-zinc-900/30 flex flex-col overflow-hidden h-full">
-          <div className="flex-1 overflow-y-auto min-h-0">
-            <ComponentGraph
-              ref={componentGraphRef}
-              onComponentSelected={handleComponentSelected}
-              analysisQuery={analysisQuery}
-              isAnalyzing={isAnalyzing && !isAnalysisPaused}
-              onAnalysisComplete={handleAnalysisComplete}
-              onReset={() => {
-                setParts([]);
-                setSelectedComponents(new Map());
-                highestHierarchyRef.current = -1;
-              }}
-              onGetHighestHierarchy={() => highestHierarchyRef.current}
-              onSetHighestHierarchy={(level) => {
-                highestHierarchyRef.current = level;
-              }}
-              onContextRequested={handleAnalysisContextRequested}
-              onContextProvided={handleAnalysisContextProvided}
-              contextQueryId={contextQueryId || undefined}
-            />
-          </div>
-        </motion.div>
+      <p className="px-6 py-3 bg-amber-950/50 text-amber-300 text-sm">Experimental: live engineering acceptance is not yet established. Review the evidence and open issues before ordering parts.</p>
 
-        {/* Center Panel - PCB Viewer + Chat */}
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ duration: 0.5, delay: 0.2 }}
-          className="flex-1 flex flex-col bg-zinc-950 overflow-hidden min-h-0">
-          {/* PCB Viewer - takes remaining space */}
-          <div className="flex-1 overflow-hidden min-h-0">
-            <PCBViewer selectedComponents={selectedComponents} />
-          </div>
-          {/* Chat - only visible after initial analysis completes */}
-          {analysisComplete && (
-            <div className="flex-shrink-0 border-t border-zinc-800 overflow-hidden">
-              <Chat
-                onQuerySent={handleQuerySent}
-                onRefinementSent={handleRefinementSent}
-                onContextRequested={handleChatContextRequested}
-                onContextProvided={handleChatContextProvided}
-                onQueryKilled={handleQueryKilled}
-                analysisComplete={analysisComplete}
-                isRefining={isRefining}
-              />
-            </div>
-          )}
-        </motion.div>
+      {API_CONFIG.useMock && <div className="px-6 py-3 bg-amber-950/50 text-amber-300 text-sm">Demo mode is enabled. Live analysis is disabled.</div>}
 
-        {/* Right Panel - Parts List */}
-        <motion.div
-          initial={{ x: 20, opacity: 0 }}
-          animate={{ x: 0, opacity: 1 }}
-          transition={{ duration: 0.5, delay: 0.4 }}
-          className="w-[24vw] min-w-[320px] max-w-[480px] border-l border-zinc-800 bg-zinc-900/30 flex flex-col overflow-hidden h-full">
-          <div className="flex-1 overflow-y-auto min-h-0">
-            <PartsList parts={parts} />
+      <main className="max-w-[1500px] mx-auto grid lg:grid-cols-[minmax(0,1fr)_420px]">
+        <div className="p-6 space-y-6 min-w-0">
+          <Card className="bg-zinc-900/50 border-zinc-800 p-5">
+            <h2 className="text-lg mb-3">{snapshot ? "Device request" : "Describe your device"}</h2>
+            {snapshot ? <p className="text-zinc-300 whitespace-pre-wrap">{snapshot.original_request}</p> : <form onSubmit={event => { event.preventDefault(); void run({ query: query.trim() }); }}>
+              <Textarea aria-label="Device requirements" value={query} onChange={event => setQuery(event.target.value)} maxLength={10000} placeholder="A temperature and humidity sensor with WiFi and Bluetooth, powered by USB-C…" className="bg-zinc-950 border-zinc-700 min-h-28" disabled={busy} />
+              <Button type="submit" disabled={busy || !query.trim() || API_CONFIG.useMock} className="mt-3 bg-emerald-600 hover:bg-emerald-500">Generate BOM</Button>
+            </form>}
+            {snapshot?.summary && <p className="text-sm text-zinc-400 mt-4">{snapshot.summary}</p>}
+          </Card>
+
+          <div aria-live="polite" className="space-y-3">
+            {busy && <div className="flex items-center justify-between gap-4 text-sm text-emerald-400"><span className="flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin shrink-0" />{progress || "Analysis in progress…"}</span><Button variant="outline" size="sm" onClick={() => controller.current?.abort()} className="border-zinc-700 text-zinc-300"><Square className="w-3 h-3" /> Stop</Button></div>}
+            {error && <p role="alert" className="border border-red-900 bg-red-950/30 text-red-300 p-4 rounded-lg text-sm">{error}</p>}
+            {!busy && snapshot && <div className="flex flex-wrap items-center gap-3">
+              <span className={`text-sm ${snapshot.compatibility === "checked" && !error ? "text-emerald-400" : "text-amber-400"}`}>{error ? "Request did not finish successfully — see error above" : compatibilityLabels[snapshot.compatibility]}</span>
+              <Button variant="ghost" size="sm" onClick={() => void reload()} className="text-zinc-400"><RefreshCw className="w-3 h-3" /> Reload saved result</Button>
+            </div>}
+            {!busy && snapshot?.terminal_reason && <p className="text-sm text-zinc-400">{snapshot.terminal_reason}</p>}
+            {!busy && progress && snapshot?.lifecycle === "running" && <p className="text-sm text-zinc-400">{progress}</p>}
           </div>
-        </motion.div>
-      </div>
+
+          {snapshot?.lifecycle === "needs_input" && <Card className="bg-zinc-900/50 border-amber-900 p-5">
+            <h2 className="text-lg mb-4">A little more detail is needed</h2>
+            <form onSubmit={event => { event.preventDefault(); void run({ base_run_id: snapshot.id, answers }); }} className="space-y-4">
+              {snapshot.pending_questions.map(question => <label key={question.id} className="block text-sm text-zinc-300">
+                {question.question}{question.guidance && <span className="block text-xs text-zinc-500 mt-1">{question.guidance}</span>}
+                <Textarea value={answers[question.id] ?? ""} onChange={event => setAnswers(previous => ({ ...previous, [question.id]: event.target.value }))} className="mt-2 bg-zinc-950 border-zinc-700" required disabled={busy} maxLength={10000} />
+              </label>)}
+              <Button type="submit" disabled={busy || !snapshot.pending_questions.every(question => answers[question.id]?.trim())} className="bg-emerald-600 hover:bg-emerald-500">Continue design</Button>
+            </form>
+          </Card>}
+
+          {snapshot && <>
+            {snapshot.assumptions.length > 0 && <Card className="bg-zinc-900/50 border-zinc-800 p-5">
+              <h2 className="text-lg mb-3">Design assumptions</h2>
+              <ul className="list-disc pl-5 space-y-2 text-sm text-zinc-400">{snapshot.assumptions.map(item => <li key={item.id}>{item.description}</li>)}</ul>
+            </Card>}
+
+            {snapshot.components.some(item => !item.product) && <Card className="bg-zinc-900/50 border-amber-900 p-5">
+              <h2 className="text-lg mb-3">Unresolved selections</h2>
+              {snapshot.components.filter(item => !item.product).map(item => <p key={item.id} className="text-sm text-amber-300 mt-2">{item.id} · {item.name}: {item.selection_error || "Selection pending"}</p>)}
+            </Card>}
+
+            <Card className="bg-zinc-900/50 border-zinc-800 p-5">
+              <h2 className="text-lg mb-2">Compatibility review</h2>
+              <p className="text-xs text-zinc-500 mb-4">Source-assisted model review and explicit code checks. {outstanding.length} unresolved check(s). This is a pre-layout review, not a finished schematic or tested PCB.</p>
+              {!findings.length && <p className="text-sm text-zinc-500">No review results yet.</p>}
+              <div className="space-y-3">{findings.map(finding => <details key={finding.id} open={finding.kind === "check" && ["fail", "unknown"].includes(finding.status)} className="border border-zinc-800 rounded-md p-3">
+                <summary className="cursor-pointer text-sm"><span className={finding.status === "pass" ? "text-emerald-400" : finding.status === "fail" ? "text-red-300" : "text-amber-300"}>{finding.status.replaceAll("_", " ")}</span><span className="text-zinc-300 ml-2">{finding.area} · {finding.kind === "guidance" ? "guidance" : finding.method === "code" ? "code check" : "model review"}</span></summary>
+                <p className="text-sm text-zinc-400 mt-3">{finding.explanation}</p>
+                {finding.remedy && <p className="text-sm text-zinc-300 mt-2">{finding.remedy}</p>}
+                <div className="flex flex-wrap gap-3 text-xs text-emerald-400 mt-3">{finding.evidence_ids.map(id => {
+                  const evidence = snapshot.evidence.find(item => item.id === id);
+                  const document = snapshot.documents.find(item => item.document_id === evidence?.document_id);
+                  const url = safeUrl(document?.url);
+                  return url && evidence ? <a key={id} href={`${url.split("#")[0]}#page=${evidence.page}`} target="_blank" rel="noopener noreferrer" title={evidence.fact}>{document?.title || id} · p. {evidence.page}</a> : <span key={id} className="text-zinc-500">{id}</span>;
+                })}</div>
+              </details>)}</div>
+            </Card>
+
+            {snapshot.configuration_notes.length > 0 && <details className="border border-zinc-800 bg-zinc-900/30 rounded-xl p-5">
+              <summary className="cursor-pointer">Configuration and layout notes</summary>
+              <ul className="list-disc pl-5 space-y-2 text-sm text-zinc-400 mt-4">{snapshot.configuration_notes.map((note, index) => <li key={index}>{note}</li>)}</ul>
+            </details>}
+
+            {snapshot.lifecycle !== "needs_input" && <Card className="bg-zinc-900/50 border-zinc-800 p-5">
+              <h2 className="text-lg mb-3">Refine this design</h2>
+              <form onSubmit={event => { event.preventDefault(); void run({ base_run_id: snapshot.id, modification: modification.trim() }); }}>
+                <Textarea aria-label="Design modification" value={modification} onChange={event => setModification(event.target.value)} disabled={!canRefine} maxLength={10000} placeholder="Add a second sensor, change the supply, or adjust a requirement…" className="bg-zinc-950 border-zinc-700" />
+                <Button type="submit" disabled={!canRefine || !modification.trim()} className="mt-3 bg-emerald-600 hover:bg-emerald-500">Update and recheck</Button>
+              </form>
+            </Card>}
+          </>}
+        </div>
+        <aside className="border-l border-zinc-800 bg-zinc-900/30 min-w-0"><PartsList snapshot={snapshot} /></aside>
+      </main>
     </div>
   );
 }
