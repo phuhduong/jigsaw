@@ -11,7 +11,7 @@ import PartsList from "./PartsList";
 
 const compatibilityLabels = { checked: "Compatibility checked", issues_found: "Compatibility issues found", incomplete: "Compatibility review incomplete" };
 
-export default function DesignInterface({ initialQuery = "" }: { initialQuery?: string }) {
+export default function DesignInterface({ initialQuery = "", runId = null }: { initialQuery?: string; runId?: string | null }) {
   const navigate = useNavigate();
   const [snapshot, setSnapshot] = useState<DesignSnapshot | null>(null);
   const [query, setQuery] = useState(initialQuery);
@@ -24,9 +24,9 @@ export default function DesignInterface({ initialQuery = "" }: { initialQuery?: 
   const generation = useRef(0);
   const activeRunId = useRef<string | null>(null);
 
-  const run = useCallback(async (request: RunRequest, externalController?: AbortController) => {
+  const run = useCallback(async (request: RunRequest) => {
     controller.current?.abort();
-    const current = externalController ?? new AbortController();
+    const current = new AbortController();
     controller.current = current;
     const ticket = ++generation.current;
     activeRunId.current = null;
@@ -41,7 +41,10 @@ export default function DesignInterface({ initialQuery = "" }: { initialQuery?: 
         if (generation.current !== ticket) return;
         if (activeRunId.current && activeRunId.current !== event.run_id) return;
         if (event.sequence <= sequence) return;
-        activeRunId.current = event.run_id;
+        if (!activeRunId.current) {
+          activeRunId.current = event.run_id;
+          void navigate(`/design?run=${encodeURIComponent(event.run_id)}`, { replace: true, state: null });
+        }
         sequence = event.sequence;
         if (event.snapshot) setSnapshot(event.snapshot);
         if (event.message || event.stage) setProgress(event.message || event.stage!.replaceAll("_", " "));
@@ -56,28 +59,64 @@ export default function DesignInterface({ initialQuery = "" }: { initialQuery?: 
         controller.current = null;
       }
     }
-  }, []);
+  }, [navigate]);
 
-  useEffect(() => {
-    const initial = new AbortController();
-    // Cleanup can cancel a development remount before it starts a duplicate run.
-    if (initialQuery.trim()) queueMicrotask(() => { if (!initial.signal.aborted) void run({ query: initialQuery }, initial); });
-    return () => { initial.abort(); controller.current?.abort(); generation.current += 1; };
-  }, [initialQuery, run]);
-
-  const reload = async () => {
-    const id = activeRunId.current ?? snapshot?.id;
-    if (!id) return;
-    const ticket = generation.current;
+  const loadSaved = useCallback(async (id: string) => {
+    controller.current?.abort();
+    const current = new AbortController();
+    controller.current = current;
+    const ticket = ++generation.current;
+    activeRunId.current = id;
+    setBusy(true);
+    setError(null);
+    setProgress("Loading saved result…");
     try {
-      const saved = await getSavedRun(id);
+      const saved = await getSavedRun(id, current.signal);
       if (generation.current !== ticket) return;
       setSnapshot(saved);
       setError(null);
       setProgress(saved.lifecycle === "running" ? "The backend is finishing its current operation. Reload again shortly." : saved.terminal_reason);
     } catch (failure) {
       if (generation.current === ticket) setError(failure instanceof Error ? failure.message : "Could not retrieve the saved run.");
+    } finally {
+      if (generation.current === ticket) {
+        setBusy(false);
+        controller.current = null;
+      }
     }
+  }, []);
+
+  useEffect(() => {
+    // Publishing the current stream's ID must not abort it or reload its snapshot.
+    if (runId && runId === activeRunId.current) return;
+    controller.current?.abort();
+    generation.current += 1;
+    activeRunId.current = null;
+    setSnapshot(null);
+    setAnswers({});
+    setModification("");
+    setError(null);
+    setBusy(false);
+    setProgress("");
+    setQuery(initialQuery);
+    let cancelled = false;
+    // Defer starts so a development remount can cancel before making a request.
+    queueMicrotask(() => {
+      if (cancelled) return;
+      if (runId) void loadSaved(runId);
+      else if (initialQuery.trim()) void run({ query: initialQuery });
+    });
+    return () => { cancelled = true; };
+  }, [initialQuery, runId, run, loadSaved]);
+
+  useEffect(() => () => {
+    controller.current?.abort();
+    generation.current += 1;
+  }, []);
+
+  const reload = () => {
+    const id = activeRunId.current ?? runId;
+    if (id) void loadSaved(id);
   };
 
   const canRefine = snapshot && snapshot.lifecycle !== "running" && !busy;
@@ -95,7 +134,7 @@ export default function DesignInterface({ initialQuery = "" }: { initialQuery?: 
         {snapshot && <span className="text-xs text-zinc-500">Revision {snapshot.revision} · {lifecycle}</span>}
       </header>
 
-      <p className="px-6 py-3 bg-amber-950/50 text-amber-300 text-sm">Experimental: live engineering acceptance is not yet established. Review the evidence and open issues before ordering parts.</p>
+      <p className="px-6 py-3 bg-amber-950/50 text-amber-300 text-sm">Experimental: compatibility checks apply to the recorded parts and assumptions, not a tested PCB. Review the evidence and open issues before ordering parts.</p>
 
       {API_CONFIG.useMock && <div className="px-6 py-3 bg-amber-950/50 text-amber-300 text-sm">Demo mode is enabled. Live analysis is disabled.</div>}
 
@@ -113,6 +152,7 @@ export default function DesignInterface({ initialQuery = "" }: { initialQuery?: 
           <div aria-live="polite" className="space-y-3">
             {busy && <div className="flex items-center justify-between gap-4 text-sm text-emerald-400"><span className="flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin shrink-0" />{progress || "Analysis in progress…"}</span><Button variant="outline" size="sm" onClick={() => controller.current?.abort()} className="border-zinc-700 text-zinc-300"><Square className="w-3 h-3" /> Stop</Button></div>}
             {error && <p role="alert" className="border border-red-900 bg-red-950/30 text-red-300 p-4 rounded-lg text-sm">{error}</p>}
+            {!busy && !snapshot && runId && <Button variant="ghost" size="sm" onClick={reload} className="text-zinc-400"><RefreshCw className="w-3 h-3" /> Retry saved result</Button>}
             {!busy && snapshot && <div className="flex flex-wrap items-center gap-3">
               <span className={`text-sm ${snapshot.compatibility === "checked" && !error ? "text-emerald-400" : "text-amber-400"}`}>{error ? "Request did not finish successfully — see error above" : compatibilityLabels[snapshot.compatibility]}</span>
               <Button variant="ghost" size="sm" onClick={() => void reload()} className="text-zinc-400"><RefreshCw className="w-3 h-3" /> Reload saved result</Button>

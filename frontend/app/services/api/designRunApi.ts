@@ -1,4 +1,10 @@
-import { API_CONFIG } from "./config";
+import { API_CONFIG } from "./config.ts";
+
+export interface PurchasingOptions {
+  board_quantity: number;
+  region: string;
+  currency: string;
+}
 
 export interface BomRow {
   reference_ids: string[];
@@ -8,38 +14,71 @@ export interface BomRow {
   package: string | null;
   installed_quantity: number;
   board_quantity: number;
+  required_quantity: number;
   order_quantity: number;
   unit_price: number | null;
   extended_price: number | null;
   currency: string;
+  supplier_sku: string | null;
   purchase_url: string | null;
   datasheet_url: string | null;
+  stock: number | null;
+  moq: number | null;
+  order_multiple: number | null;
+  retrieved_at: string;
   availability: "available" | "out_of_stock" | "unknown";
   ordering_note: string;
+  review_status: DesignSnapshot["compatibility"];
+}
+
+export interface Finding {
+  id: string;
+  revision: number;
+  area: "requirements" | "power" | "signals" | "support" | "evidence";
+  method: "code" | "model_review";
+  kind: "check" | "guidance";
+  status: "pass" | "fail" | "unknown" | "not_applicable";
+  subject_ids: string[];
+  evidence_ids: string[];
+  document_id: string | null;
+  explanation: string;
+  remedy: string;
 }
 
 export interface DesignSnapshot {
   id: string;
+  parent_run_id: string | null;
   revision: number;
+  created_at: string;
+  updated_at: string;
   lifecycle: "running" | "needs_input" | "finished" | "interrupted" | "error";
   compatibility: "checked" | "issues_found" | "incomplete";
   sourcing: "available" | "partial" | "unknown";
   stage: string;
   summary: string;
   original_request: string;
+  modification: string | null;
+  options: PurchasingOptions;
+  model: string;
+  model_configuration: Record<string, string>;
+  prompt_version: string;
   terminal_reason: string;
   review_completed: boolean;
   assumptions: Array<{ id: string; description: string }>;
   components: Array<{ id: string; name: string; purpose: string; selection_error: string | null; product: { mpn: string } | null }>;
-  pending_questions: Array<{ id: string; question: string; guidance: string }>;
+  pending_questions: Array<{ id: string; requirement_id: string; question: string; guidance: string }>;
   configuration_notes: string[];
-  findings: Array<{
-    id: string; revision: number; area: string; method: string; kind: "check" | "guidance";
-    status: "pass" | "fail" | "unknown" | "not_applicable";
-    explanation: string; remedy: string; evidence_ids: string[];
+  findings: Finding[];
+  evidence_errors: Finding[];
+  evidence: Array<{
+    id: string; component_ids: string[]; document_id: string; page: number;
+    kind: "text" | "figure"; quote: string; fact: string; conditions: string;
   }>;
-  evidence: Array<{ id: string; document_id: string; page: number; fact: string }>;
-  documents: Array<{ document_id: string; url: string; title: string }>;
+  documents: Array<{
+    document_id: string; url: string; requested_url: string; title: string;
+    content_hash: string; media_type: string; fetched_at: string; page_count: number;
+    pages_interpreted?: number[];
+  }>;
   bom: BomRow[];
 }
 
@@ -52,7 +91,7 @@ export interface RunEvent {
   snapshot?: DesignSnapshot;
 }
 
-export type RunRequest = { query: string } | { base_run_id: string; modification: string } | {
+export type RunRequest = { query: string; options?: Partial<PurchasingOptions> } | { base_run_id: string; modification: string } | {
   base_run_id: string; answers: Record<string, string>;
 };
 
@@ -78,10 +117,15 @@ async function responseError(response: Response): Promise<Error> {
   return new Error(data?.error || `Backend request failed (HTTP ${response.status})`);
 }
 
-export async function getSavedRun(id: string): Promise<DesignSnapshot> {
-  const response = await fetch(`${baseUrl()}/api/runs/${encodeURIComponent(id)}`, { signal: AbortSignal.timeout(20000) });
+export async function getSavedRun(id: string, signal?: AbortSignal): Promise<DesignSnapshot> {
+  const timeout = AbortSignal.timeout(20000);
+  const response = await fetch(`${baseUrl()}/api/runs/${encodeURIComponent(id)}`, {
+    signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+  });
   if (!response.ok) throw await responseError(response);
-  return response.json();
+  const snapshot = await response.json() as DesignSnapshot;
+  if (snapshot.id !== id) throw new Error("The backend returned a mismatched saved design.");
+  return snapshot;
 }
 
 /** One POST stream, with a deadline covering headers and the entire response body. */

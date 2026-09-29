@@ -8,7 +8,7 @@ export function meta({}: Route.MetaArgs) {
     {
       name: "description",
       content:
-        "Describe your circuit board in plain language, and our AI finds compatible components and generates a complete buy list.",
+        "Describe your device in plain language to get an evidence-backed pre-layout BOM with purchasing links and compatibility findings.",
     },
   ];
 }
@@ -16,6 +16,7 @@ export function meta({}: Route.MetaArgs) {
 export default function Design() {
   const location = useLocation();
   const query = (location.state as { query?: string })?.query || "";
-  
-  return <DesignInterface initialQuery={query} />;
+  const runId = new URLSearchParams(location.search).get("run");
+
+  return <DesignInterface initialQuery={query} runId={runId} />;
 }

@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { Upload, Zap } from "lucide-react";
+import { Zap } from "lucide-react";
 import { Button } from "~/components/ui/button";
 import { Textarea } from "~/components/ui/textarea";
 import { Card } from "~/components/ui/card";
@@ -10,7 +10,7 @@ const PLACEHOLDER_PROMPT =
 
 export default function LandingPage() {
   const [chatInput, setChatInput] = useState("");
-  const [showPlaceholder, setShowPlaceholder] = useState(true);
+  const showPlaceholder = chatInput.length === 0;
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const navigate = useNavigate();
 
@@ -22,10 +22,6 @@ export default function LandingPage() {
     }
     if (!trimmedInput) return;
     navigate("/design", { state: { query: trimmedInput } });
-  };
-
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    e.target.value = "";
   };
 
   return (
@@ -45,8 +41,8 @@ export default function LandingPage() {
             Make your PCB&apos;s click.
           </h1>
           <p className="text-xl text-zinc-400 mb-10">
-            Describe your circuit in plain English. Jigsaw selects compatible components, checks
-            voltages and interfaces, and hands you a validated BOM.
+            Describe your device in plain English. Jigsaw selects real parts and produces a
+            pre-layout BOM with purchasing links, compatibility findings, and visible assumptions.
           </p>
 
           {/* Query Input */}
@@ -56,10 +52,7 @@ export default function LandingPage() {
                 ref={textareaRef}
                 className="bg-zinc-900/70 border-zinc-700 text-white placeholder:text-zinc-500 min-h-40 text-lg p-6 rounded-xl resize-none"
                 value={chatInput}
-                onChange={(e) => {
-                  setChatInput(e.target.value);
-                  setShowPlaceholder(e.target.value.length === 0);
-                }}
+                onChange={(e) => setChatInput(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
@@ -98,27 +91,8 @@ export default function LandingPage() {
               className="w-full bg-purple-600 hover:bg-purple-700 text-white mt-4 h-12 text-lg"
               onClick={handleChatSubmit}
               disabled={!chatInput.trim() && !showPlaceholder}>
-              Start Designing With AI
+              Generate BOM
             </Button>
-          </div>
-
-          {/* Upload */}
-          <div className="text-center mb-4">
-            <span className="text-zinc-500 text-sm">or</span>
-          </div>
-          <div
-            className="border-2 border-dashed border-zinc-700 rounded-xl p-8 text-center hover:border-zinc-600 transition-colors cursor-pointer bg-zinc-900/30"
-            onClick={() => document.getElementById("file-upload")?.click()}>
-            <Upload className="w-10 h-10 text-zinc-600 mx-auto mb-3" />
-            <p className="text-sm text-zinc-400 mb-1">Upload existing BOM or part numbers</p>
-            <p className="text-xs text-zinc-500">CSV, Excel, or text files</p>
-            <input
-              type="file"
-              className="hidden"
-              id="file-upload"
-              accept=".csv,.xlsx,.xls,.txt"
-              onChange={handleFileUpload}
-            />
           </div>
 
           {/* Value props */}
@@ -133,7 +107,7 @@ export default function LandingPage() {
             </Card>
             <Card className="bg-zinc-900/50 border-zinc-800 p-4">
               <Zap className="w-4 h-4 text-emerald-400 mb-2" />
-              Validated BOM in minutes
+              Exportable pre-layout BOM
             </Card>
           </div>
         </div>
