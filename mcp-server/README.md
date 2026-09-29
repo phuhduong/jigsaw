@@ -6,33 +6,42 @@ catalog evidence and purchasing offers; it does not approve electrical compatibi
 ## Setup
 
 1. **Install dependencies**:
+
 ```bash
 npm install
 ```
 
-2. **Set environment variables** (see `.env.template`):
+2. **Create local configuration**:
+
 ```bash
-DIGIKEY_CLIENT_ID=your_client_id
-DIGIKEY_CLIENT_SECRET=your_client_secret
-PORT=8080
+cp .env.template .env
+# Edit .env: set DIGIKEY_CLIENT_ID and DIGIKEY_CLIENT_SECRET.
+# PORT defaults to 8080.
 ```
 
 3. **Build & run**:
+
 ```bash
 npm run build
 npm start            # HTTP transport on port 8080
 npm run dev:stdio    # STDIO transport (for local MCP client testing)
 ```
 
+Run commands from `mcp-server/`. HTTP binds to `localhost` normally; setting
+`NODE_ENV=production` binds to all interfaces (`0.0.0.0`). Neither transport adds
+application authentication. Keep this service local/private; production binding alone
+does not make it safe for public access.
+
 ## Tool: search_components
 
-- **Input**: `{ query, limit?: 3, region?: "US", currency?: "USD", deadline_ms? }`
+- **Input**: `{ query, limit?, region?, currency?, deadline_ms? }`.
+  `limit` is an integer from 1 to 10, default 3; locale defaults are `US` / `USD`.
 - **Output**: Array of normalized products with exact manufacturer/MPN, package,
   labeled parameters, provider-supplied product/datasheet URLs, offers, and retrieval time.
 
 ## Tool: get_product
 
-- **Input**: `{ mpn, region?: "US", currency?: "USD", deadline_ms? }`
+- **Input**: `{ mpn, region?, currency?, deadline_ms? }`; locale defaults are `US` / `USD`.
 - **Output**: One product in the same format, backed by ProductDetails. Prefer a
   selected DigiKey SKU as `mpn` when a manufacturer part number could be ambiguous.
 

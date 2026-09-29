@@ -2,7 +2,13 @@
 
 Date: 2026-09-13  
 Reviewed document: [autonomous BOM selection and compatibility review](practical-bom-workflow.md)  
-Disposition: ready for implementation; no unresolved material architecture findings
+Disposition at review time: ready for implementation; no unresolved material architecture findings
+
+Historical pre-implementation review, preserved as recorded on 2026-09-13. The linked
+architecture has since been updated and implemented; the completed cleanup is recorded in
+[the cleanup review](../../backend/evaluations/cleanup-review.md). Future-tense milestones
+and the final statement about documentation-only changes below describe that earlier review,
+not the current repository or outstanding work.
 
 ## What was reviewed
 

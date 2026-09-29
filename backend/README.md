@@ -6,16 +6,14 @@ LangChain is the model interface, not the orchestrator. Python owns state, stage
 checks, resource limits, and completion.
 
 The working scope is common low-voltage embedded devices, not PCB or schematic design.
-A fresh unattended Flash-Lite sensor baseline passed an
-[independent source audit](evaluations/prompt18-sensor-audit.md); its sourcing was partial.
-See [verification results](evaluations/results.md) for actual runs, failures, and limits.
-One successful example is not a reliability claim for arbitrary requests.
-
-The [cleanup pass](evaluations/cleanup-review.md) passes local tests and preserves saved-run
-results. Its fresh trials did not yield another independently accepted BOM; final live
-verification remains open. After a quota reset, one fresh run was labeled checked but failed
-independent source review for capacitor double allocation and unestablished regulator support.
-The applicable code checks match the baseline; model review is still fallible.
+The [cleanup pass](evaluations/cleanup-review.md), committed as `58876b4`, passed local tests,
+saved-run regression checks and fresh unattended Flash-Lite run `29c85ccd`. That run finished
+`checked / available` and passed an
+[independent source audit](evaluations/cleanup-source-audit.md#prompt-27--accepted-conditional-pre-layout-bom)
+under its recorded operating assumptions, without manual BOM repairs. Earlier trials include
+a falsely checked result; the accepted run also retains nonblocking model-record errors.
+See [verification results](evaluations/results.md) for the dated successes, failures and limits.
+These examples do not establish reliability across arbitrary requests.
 
 ## Setup and run
 
@@ -66,7 +64,8 @@ There is no agent framework, task queue, rule engine, database, or separate purc
 `DesignRun` is the working record. `Requirement.component_ids` is the one active
 requirement mapping. Source extraction alone writes verified observations and source-owned
 support needs. Assembly/correction references those observations; it cannot replace them.
-A source reread replaces that document's packet, retaining applicable earlier facts/pages.
+A source reread receives applicable earlier observations and pages as context, then replaces
+that document's packet with the newly validated response; retention is not guaranteed by a merge.
 Part replacement invalidates the replaced owner's evidence, including shared-document variants.
 Changes invalidate the old review; code findings and badges are recomputed consistently.
 
@@ -122,9 +121,10 @@ interfaces, supply inputs and remaining rail capacity must be checked.
 Selection uses real search results, at most three candidates per query and one broader
 retry. Product details must confirm the selected manufacturer/MPN. Proven nominal-capacitance
 mismatches are rejected; missing/ranged catalog values remain for review. Exact-part labeled
-catalog fields can establish commodity passive/connector values and ratings when the current
-review explicitly names the parts, fields and product URL. Active devices/modules still need
-manufacturer evidence; suppliers never become synthetic parts.
+catalog fields and product URLs are supplied for model review of commodity passive/connector
+values and ratings. Code requires catalog parameters, a product URL and a current passing
+evidence finding naming the part; field interpretation remains model judgment. Active
+devices/modules still need manufacturer evidence; suppliers never become synthetic parts.
 
 PDF extraction receives original selected pages, including diagrams, plus text/physical-page
 labels. Review sees those original pages again, without duplicate extracted PDF text.
@@ -132,9 +132,13 @@ HTML currently supplies text and links, not embedded figure pixels. Content hash
 ownership, page checks and matching quotations establish traceability—not infallible
 interpretation. Navigation summaries are not evidence that a page was read.
 
-Source-observed support needs cannot disappear during assembly. Required/recommended parts
-must be resolved with selected placements, actual internal inclusion, or a justified omission.
-The reviewer independently looks for omitted support and wrong values. Peak loads determine
+Source-observed external support needs cannot disappear during assembly. Required external
+needs require selected placements; a recommendation can be declined only with a concrete
+rationale and current support-review finding. Already-internal module support is recorded
+separately, not used to dismiss a protected external need without correcting its source reading.
+A separate review call, using the same configured model, looks for omitted support and wrong
+values. The independent source audits in the evaluation records are development verification,
+not an additional automatic production stage. Peak loads determine
 supply capacity. Linear-regulator thermal screening uses those loads unless a separately
 justified average is declared; code calculates allowance from ambient, junction target and
 source-owned package thermal resistance. This remains a conditioned estimate for later layout,
@@ -221,6 +225,11 @@ possible. Retrieve the saved ID after transport loss. No stream replay or automa
 is implemented. Snapshots are atomically replaced under `DATA_DIR/runs`; runtime data and
 credentials must not be committed.
 
+The frontend publishes `/design?run=<id>` when a run starts and updates it for a
+refinement. Opening or refreshing that URL uses GET to restore the saved snapshot;
+it never automatically resubmits or resumes a run. The active client contract is
+[`designRunApi.ts`](../frontend/app/services/api/designRunApi.ts), not the retired chat API.
+
 ## Verification
 
 From `backend/`:
@@ -231,7 +240,8 @@ From `backend/`:
 
 Tests use short deterministic core/error paths and local model, supplier and document fakes.
 The suite includes the Python MCP boundary. Run `npm test` in `mcp-server/`, and
-`yarn typecheck` plus `yarn build` in `frontend/` for the connected code.
+`yarn test`, `yarn typecheck`, and `yarn build` in `frontend/` for the connected code.
+Frontend tests use Node's test runner with local fetch fakes and a small saved-run fixture.
 No unit test uses live models or networks.
 
 An opt-in live run consumes provider quota; start both backend services first:

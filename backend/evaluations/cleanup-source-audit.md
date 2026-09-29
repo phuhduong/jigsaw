@@ -1,5 +1,11 @@
 # Post-cleanup source audit
 
+Chronological audits of the 2026-09-14 cleanup trials. The latest disposition is
+[prompt 27's conditional acceptance](#prompt-27--accepted-conditional-pre-layout-bom).
+Earlier failures remain failures; their contemporaneous completion concerns are not the
+current cleanup status. These independent development audits are separate from the runtime
+model-review stage. No saved BOM or operating assumption was manually repaired for acceptance.
+
 ## Prompt 19 — not accepted unchanged
 
 Run `6a8325fc8b074137add0be47fa2767c3` used the original sensor request, Gemini 3.5 Flash Lite, and no manual part/page hints. It finished **incomplete / sourcing partial** after 19 model calls and two corrections; the final review exceeded the remaining input allowance. This independent review used the actual catalog records and original manufacturer pages, without changing the run.

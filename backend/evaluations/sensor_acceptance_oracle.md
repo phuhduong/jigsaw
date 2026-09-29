@@ -2,6 +2,11 @@
 
 Prepared independently on 2026-09-13 from manufacturer text and visual inspection of the cited circuit/table pages. This is a manual evaluation reference, not application rules, a live unit test, or an assertion that the current generated board is correct. Do not give the expected findings to the model being evaluated.
 
+Historical pre-BOM-only evaluation material: source facts remain useful, but its wiring-level
+cases and original evaluation gates are not current completion requirements. See the
+[implemented scope](../../docs/architecture/practical-bom-workflow.md#6-implementation-and-evaluation)
+and [dated run results](results.md) for current verification status.
+
 All page numbers below are **one-based physical pages of the original PDF**, not positions in a supplied slice. Pin numbers and reference labels belong to the named source, not automatically to Jigsaw's component IDs. Record the fetched revision/hash when running these cases; reassess changed source revisions rather than silently reusing this oracle.
 
 ## Sources and key observations

@@ -1,5 +1,7 @@
 # Backend cleanup review
 
+Verified 2026-09-14; subsequently committed as `58876b4`.
+
 Scope: the cleanup following commit `da37c00`, under `AGENTS.md`. This preserves the
 BOM-only workflow, Gemini 3.5 Flash-Lite, LangChain model integration, API routes and
 existing resource limits. It is not a new architecture or a reliability qualification.
@@ -138,9 +140,9 @@ supply domains and unresolved exact-regulator capacitor suitability. That failur
 occurs under the baseline code checks; the cleanup did not introduce or conceal it.
 This success does not establish repeatability or make model review authoritative proof.
 All failures remain in the linked results and source audit. One earlier quota failure
-was followed by a confirmed reset; quota is not a current blocker.
+was followed by a confirmed reset; quota was no longer blocking the 2026-09-14 verification.
 
 The scoped cleanup and its verification are complete. General model reliability remains
 unqualified and requires separate measured evaluation, not more cleanup infrastructure.
-No stronger model, new framework, increased budget, weakened material check, manual
-acceptance fixture or commit was introduced.
+No stronger model, new framework, increased budget, weakened material check or manual
+acceptance fixture was introduced.

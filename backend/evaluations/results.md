@@ -1,10 +1,11 @@
 # Live verification progress
 
-Recorded 2026-09-13, with continuation on 2026-09-14 UTC, from the named local run
-JSON snapshots and focused-test execution notes. This is a diagnostic progress
-record, not a frozen acceptance result.
-**The fifteen earlier full-request attempts below did not establish a positive baseline.** No release-readiness,
-free-tier quota, or engineering-reliability claim follows from these runs.
+Recorded 2026-09-13–14 UTC from the named local run JSON snapshots and focused-test
+execution notes. The latest milestone is the completed cleanup verification below,
+including accepted conditional BOM `29c85ccd`; the earlier accepted baseline is `149dc533`.
+Older sections preserve unsuccessful and guided trials as historical diagnostics, not
+current blockers or successful unattended examples. No general reliability, current stock,
+provider-quota or hardware-qualification claim follows from these records.
 
 ## BOM-only scope implementation and verification
 
@@ -53,7 +54,7 @@ actionable redacted schema retry feedback, and keeping semantic review-coverage 
 one code path instead of rejecting useful partial findings at schema parsing. The terminal
 SSE path no longer resaves the same error snapshot and changes its timestamp after emission.
 
-One tiny quota diagnostic after the last trial also returned HTTP 429. The provider named
+One tiny quota diagnostic after the prompt-22 repeat also returned HTTP 429. The provider named
 `GenerateRequestsPerDayPerProjectPerModel-FreeTier`, model `gemini-3.5-flash-lite`, quota
 value **500**. This is exhausted daily request quota, not just an inferred transient failure.
 Calls stopped until the midnight-Pacific daily reset. A tiny same-model diagnostic then
@@ -118,7 +119,7 @@ in a snapshot identical to saved/GET/JSON output, and HTTP CSV matches the expor
 byte-for-byte. The scoped cleanup acceptance is complete. General model reliability is not
 qualified by this success, and the earlier false-positive checked result remains a failure.
 
-### Current autonomous-completion goal (2026-09-14)
+### Earlier autonomous-completion baseline (2026-09-14)
 
 The user clarified that a manually guided/source-audited BOM does not satisfy the
 goal. Acceptance requires a fresh original-query run, without a parent,
@@ -796,7 +797,11 @@ resumed useful work without performing the rejected diagnostic; see the current
 decision above. No paid fallback, production response-method change, or further
 budget increase followed.
 
-## Implemented fixes and remaining verification
+## Historical implementation fixes and then-remaining verification
+
+This section records the earlier prompt-4–6 phase before the BOM-only alignment and
+accepted baselines. Its unresolved-goal statements describe that phase, not current
+cleanup status; see [backend cleanup verification](#backend-cleanup-verification-2026-09-14).
 
 Source extraction now retains separate source-owned support obligations. Circuit
 assembly must provide same-ID fulfillment; omitting a source obligation leaves an

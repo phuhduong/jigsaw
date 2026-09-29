@@ -26,24 +26,16 @@ Incomplete results remain visible and exportable. Live end-to-end reliability is
 still being evaluated; passing local tests does not establish engineering accuracy.
 
 Current status: **a working local/private baseline, not a qualified PCB-design product**.
-A fresh original-query Flash-Lite run (`149dc533`) completed compatibility review
-without manual parts or source-page guidance: 15 placements / 13 MPNs in 132 seconds.
-The [independent source audit](backend/evaluations/prompt18-sensor-audit.md) accepts
-the selected parts under the recorded operating assumptions and ordinary pre-layout
-placement choices. Sourcing is partial: one bypass capacitor has a purchase link
-but no supplier price/stock offer; $9.34 is the known subtotal excluding that part.
-The deterministic backend tests pass, and saved/streamed/JSON/CSV results agree. This establishes
-one unattended positive baseline, not a reliability rate across arbitrary requests.
-See the [actual results and earlier failures](backend/evaluations/results.md).
-
-The latest [backend cleanup](backend/evaluations/cleanup-review.md) passes local tests,
-saved-run regression checks and a fresh original-query run (`29c85ccd`). Independent source
-review accepts its 15 placements / 12 MPNs under the saved operating assumptions; all have
-supplier offers totaling $9.76 at the snapshot. It completed in 105 seconds using 14 model
-calls. Its explanatory record still contains nonblocking model errors. Earlier trials
-include a falsely checked BOM with a material support-part problem, so repeatability and
-model-review reliability remain unqualified; the cleanup did not change the applicable
-code checks. Both successes and failures remain in the evaluation record.
+The [backend cleanup](backend/evaluations/cleanup-review.md), committed as `58876b4`, passed
+local tests, saved-run regression checks and fresh original-query Flash-Lite run `29c85ccd`.
+Independent source review accepts its 15 placements / 12 MPNs under the saved operating
+assumptions, without manual parts/page guidance or run repairs. All have supplier offers
+totaling $9.76 at the 2026-09-14 snapshot; it completed in 105 seconds using 14 model calls.
+Saved, streamed and exported results agree. Its explanatory record still contains nonblocking
+model errors. Earlier trials include a falsely checked BOM with a material support-part
+problem, so repeatability and model-review reliability remain unqualified. The applicable
+code checks were not weakened. The [evaluation record](backend/evaluations/results.md)
+preserves both successes and failures, including the earlier partial-sourcing baseline `149dc533`.
 
 ---
 
@@ -54,7 +46,7 @@ You'll need three things running: the MCP server (DigiKey), the backend (Flask +
 ### Prerequisites
 
 - Python 3.11+
-- Node.js 22.12+ and Yarn 4 for the frontend
+- Node.js 22.12+ and Yarn 4 for the frontend (the version is declared in `frontend/package.json`; use Corepack to activate it)
 - A [Gemini API key](https://aistudio.google.com/apikey) with access to the configured model
 - [DigiKey API credentials](https://developer.digikey.com/) with Product Information API access
 
@@ -97,7 +89,8 @@ and failure handling.
 
 ```bash
 cd frontend
-yarn install
+corepack enable
+yarn install --immutable
 yarn dev
 ```
 
@@ -107,6 +100,15 @@ The frontend uses the local backend by default. Set `VITE_BACKEND_URL` if needed
 `VITE_USE_MOCK=true` explicitly disables live generation and displays a demo-mode
 notice. The active design screen shows saved snapshots, findings, and BOM exports;
 it does not generate or display a speculative PCB layout.
+
+The page records the current result as `/design?run=<id>`. Refreshing or opening that
+URL retrieves the saved snapshot with GET; it does not resubmit the original request
+or resume interrupted work. Refinement creates a new run and updates the URL.
+
+For a local production-build preview, run `yarn build` then `yarn start`. This serves
+the static SPA from `build/client`, not an SSR server or production hosting service.
+The preview defaults to `http://127.0.0.1:4173`; set the backend's `FRONTEND_ORIGIN`
+to that origin when using it.
 
 ## Architecture and API
 
@@ -144,6 +146,7 @@ cd backend
 cd ../mcp-server
 npm test
 cd ../frontend
+yarn test
 yarn typecheck
 yarn build
 ```
