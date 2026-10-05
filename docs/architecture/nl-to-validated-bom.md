@@ -1,8 +1,8 @@
 # Jigsaw backend architecture
 
 **Status:** superseded historical proposal — not an implementation requirement
-**Date:** 2026-09-13  
-**Scope:** a free, local-first, single-user side project that compiles natural-language embedded-system requirements into an evidence-backed pre-layout logical design and exact engineering BOM (EBOM) inside a deliberately supported design family  
+**Date:** 2026-09-13\
+**Scope:** a free, local-first, single-user side project that compiles natural-language embedded-system requirements into an evidence-backed pre-layout logical design and exact engineering BOM (EBOM) inside a deliberately supported design family\
 **Supersedes:** the earlier multi-agent/DigiKey pipeline and the earlier proposal that made KiCad generation part of the core acceptance predicate
 
 ## 1. Executive decision

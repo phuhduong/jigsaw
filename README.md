@@ -8,34 +8,41 @@
 
 Jigsaw is a small side project for common low-voltage embedded devices. Describe what
 you want to build; the workflow selects actual DigiKey parts, reads manufacturer
-documents, adds supporting components, checks BOM compatibility, and attempts
-bounded corrections. The result includes a BOM with purchase links, source evidence,
-assumptions, and unresolved issues.
+documents, checks component compatibility, and attempts bounded corrections. The result
+is a pre-layout BOM of functional components with purchase links, source evidence,
+operating assumptions, and support/configuration notes for later schematic work.
 
-“Compatibility checked” means the selected parts have an evidence-backed feasible
-common operating configuration, including necessary support parts, values and
-quantities. Review covers operating ranges, current budgets, logic levels, and
-available interfaces/resources. It does not design wiring, assign numbered pins,
-produce a netlist, or require a complete programming-pad plan. Only missing or
-conflicting evidence material to a BOM claim blocks the result; discarded unused
-observations remain visible guidance.
+Completed reviews report **Checks passed** or **Checks failed**. A pass means the
+performed checks identified no explicit functional or electrical compatibility error.
+Review covers requested functions, operating ranges, current budgets, logic levels,
+available interfaces/resources, and necessary functional blocks such as regulators and
+level translators. Routine decoupling, pull-ups, and reset/boot or feedback networks are
+not an exhaustive purchasing inventory. Explicitly requested passives and any parts
+actually selected are still checked. Unknowns and evidence or reporting gaps remain
+inspectable details without blocking the verdict. Without a
+completed review or an identified error, a run has no verdict. The workflow does not
+design wiring, assign numbered pins, produce a netlist, or require a complete programming-pad plan.
 
-This is a source-assisted assessment—not a schematic, tested PCB, or guarantee of
-electrical correctness.
-Incomplete results remain visible and exportable. Live end-to-end reliability is
-still being evaluated; passing local tests does not establish engineering accuracy.
+This is a source-assisted assessment, not a complete PCB parts inventory, schematic,
+tested board, or guarantee of electrical correctness.
+All generated results remain visible and exportable. Current status is a functioning
+local/private prototype. The [current cleanup verification](backend/evaluations/results.md#functional-component-cleanup-2026-09-30-prompt-41)
+passed local tests and a fresh end-to-end sensor run with four available functional parts,
+including matching saved reports and exports. Independent inspection found plausible component
+choices but inaccurate or unsupported electrical-report claims, especially for the regulator.
+This is working generation, not established general reliability. Earlier results retain their
+original support-inventory scope and outcomes in the verification record.
 
-Current status: **a working local/private baseline, not a qualified PCB-design product**.
-The [backend cleanup](backend/evaluations/cleanup-review.md), committed as `58876b4`, passed
-local tests, saved-run regression checks and fresh original-query Flash-Lite run `29c85ccd`.
-Independent source review accepts its 15 placements / 12 MPNs under the saved operating
-assumptions, without manual parts/page guidance or run repairs. All have supplier offers
-totaling $9.76 at the 2026-09-14 snapshot; it completed in 105 seconds using 14 model calls.
-Saved, streamed and exported results agree. Its explanatory record still contains nonblocking
-model errors. Earlier trials include a falsely checked BOM with a material support-part
-problem, so repeatability and model-review reliability remain unqualified. The applicable
-code checks were not weakened. The [evaluation record](backend/evaluations/results.md)
-preserves both successes and failures, including the earlier partial-sourcing baseline `149dc533`.
+The [October 4 preset evaluation](backend/evaluations/preset-generalization-2026-10-04.md)
+ran eight fresh requests on unchanged backend code. Independent source audits found three
+plausible component sets, two correctly reported failures, and three passing results with
+material errors, including the wireless control. Battery and display presets remain removed;
+the remaining wireless example is not a reliability guarantee.
+
+The UI follows the [frontend reporting contract](backend/README.md#frontend-reporting-contract):
+useful BOM information, operating assumptions, schematic-stage notes, and actual failures
+appear in the normal report. Detailed review prose and numerical records are kept in
+diagnostics; unbound quantities are not presented as operating figures.
 
 ---
 
@@ -97,13 +104,40 @@ yarn dev
 Open `http://localhost:5173`.
 
 The frontend uses the local backend by default. Set `VITE_BACKEND_URL` if needed;
-`VITE_USE_MOCK=true` explicitly disables live generation and displays a demo-mode
-notice. The active design screen shows saved snapshots, findings, and BOM exports;
-it does not generate or display a speculative PCB layout.
+the legacy `VITE_USE_MOCK=true` flag disables generation and displays a preview notice.
+It does not provide mock data; saved designs remain available. Start with a device
+description; purchasing uses the backend defaults of one board,
+US sourcing, and USD. The request screen keeps one illustrated wireless-sensor example; the battery logger
+and display monitor presets remain removed after independent evaluation. Other device
+descriptions can still be entered freely. The workspace has two views:
+
+- **Map:** recorded power and data relationships, with restrained technical illustrations.
+  Hover or focus a part to trace its connections; select it for the reason it was chosen,
+  its price, supplier link, and datasheet. The diagram keeps a fixed arrangement when
+  details open or the screen narrows; scroll the canvas or use its zoom and fit controls.
+- **Parts:** illustrated rows with grouped quantities, prices, and purchase links. Narrow screens stack
+  each row. Missing selections remain visible, and stock shortages or extra order quantities
+  appear only when relevant. Component details keep selection reasoning under “Why this part.”
+
+Build notes beneath the workspace contain operating assumptions, schematic-stage notes,
+and actual compatibility failures. Complete backend diagnostics remain available through
+Export → Full JSON; the same menu also offers the parts CSV. There are no technical-record
+or run-metadata drawers in the normal interface.
+
+The map represents recorded BOM relationships, not physical packages, a PCB layout, or a
+wiring plan. Generation shows one plain-language stage from backend events. The review
+outcome is separate from sourcing and run lifecycle; unknown prices and unreviewed results
+stay visible, and nonblocking unknowns and evidence gaps do not become issue banners.
 
 The page records the current result as `/design?run=<id>`. Refreshing or opening that
 URL retrieves the saved snapshot with GET; it does not resubmit the original request
-or resume interrupted work. Refinement creates a new run and updates the URL.
+or resume interrupted work. Changes and clarification answers create a new run and update
+the URL; browser Back returns to the parent result. Keep the tab open during analysis.
+Stop closes the connection and keeps the last received result. Change opens the revision
+form and preserves its draft when closed. Failed reviews offer “Try to fix issues”; unfinished
+results offer “Try again.” These start explicit new revisions rather than retrying indefinitely.
+Operational failures use plain-language messages; provider names, raw exceptions, and
+source-selection instructions stay out of the normal interface. Full JSON retains diagnostics.
 
 For a local production-build preview, run `yarn build` then `yarn start`. This serves
 the static SPA from `build/client`, not an SSR server or production hosting service.
@@ -115,7 +149,7 @@ to that origin when using it.
 React consumes a Flask progress stream. One explicit Python workflow owns the
 design record, evidence, checks, and bounded repair; LangChain remains the model
 integration layer. Focused per-document extraction produces source-checked
-observations; a separate BOM/support proposal references them, and whole-BOM review
+observations; a separate operating-configuration proposal references them, and whole-BOM review
 still sees the original relevant PDF pages. DigiKey search/details stay in the
 existing MCP process. Runs and source documents are stored locally under
 `backend/data/` by default.
@@ -154,9 +188,51 @@ yarn build
 These checks use local fakes or compile the application; they do not call live
 models or suppliers. Live model/PDF capability checks and source-grounded design
 evaluation are separate, quota-consuming work described in the backend guide.
-Local verification and an independently audited unattended sensor run have passed.
-The earlier evaluation plan remains historical, not a gate for this BOM-only workflow.
-Successful examples are not proof of reliability across arbitrary requests.
+Frontend tests cover stream/restoration contracts, recorded system relationships,
+report handling of current findings, shared support, and unknown prices; and diagram
+geometry that keeps recorded connections clear of component interiors. The
+reusable saved-run fixture is `frontend/tests/fixtures/designRun.ts`.
+
+The October 5 UI refinement passed 33 local tests, typecheck, and production build. Browser
+verification covered desktop and mobile layouts, saved success/failure/error states, clarification,
+one-click repair, rejected-update retry, Stop and reload, parent-history navigation, keyboard
+focus, and CSV/JSON downloads. Controlled error/recovery scenarios used a separate local fixture
+service; no production snapshots were altered. A fresh request submitted through the live UI
+produced run `30d40d3873864ab3a4f23a0138f489bc`: Checks passed, six placements grouped into five
+purchasing rows, USD 8.17, 68.64 seconds, and 11 model calls. Downloaded JSON matched the saved
+record and CSV contained the same five purchasing rows. This verifies frontend integration;
+the backend verdict is not a new independent engineering evaluation. Local screenshots are
+in `output/verification/ui-ux-*.jpg`; `output/` is ignored and is not published with the repository.
+
+The final typography and spacing pass uses locally hosted Space Grotesk and IBM Plex
+fonts (licenses and sources in `frontend/public/fonts`). The map canvas follows diagram
+size within a viewport limit, with tighter surrounding controls and supporting-part rows.
+Browser checks at phone, tablet, and desktop widths covered saved sensor and motor designs,
+parts, selection, and zoom-out/Fit recovery. All 33 tests, typecheck, and production build
+passed. This visual pass used saved results and did not submit a new model run.
+Local screenshots are in `output/verification/polish-*.jpg`.
+
+The frontend cleanup preserved behavior across all 57 saved runs: diagram geometry and
+1,976 report/illustration renders matched the pre-cleanup implementation exactly. Browser
+checks covered generation, revisions, clarification, retry, Stop/reload, history, export links,
+and keyboard focus using local fixtures. Desktop map and mobile request/parts layouts also
+matched the baseline. Typecheck now rejects unused locals and parameters; the existing
+33 tests, immutable install, and production build pass. No backend code or visual assets
+changed. The local verification record is `output/verification/frontend-cleanup.json`.
+
+On 2026-09-30, a fresh wireless-sensor request submitted through the UI produced saved run
+`6658e55b1a9a4b4892737b0a1fd30f48`: four available functional parts, USD 7.50,
+Checks passed, 55.73 seconds, nine model calls, and 71,796 input tokens with no budget stop.
+Saved-page reload and downloaded CSV/JSON were verified. This verifies the live UI workflow;
+the pass reflects the performed checks, with source and numerical gaps retained as diagnostics.
+The diagram revision was also checked in the browser with the saved result and local
+synthetic records covering branched supplies, long regulator chains, external power/data,
+unfinished selections, long labels, and empty results. Desktop and narrow-screen checks
+covered selection visibility, stable zoom, keyboard access, the fit overview, and page
+overflow. This visual revision did not submit another model run.
+Local verification passes, but the historical [BOM-only reliability gate](backend/evaluations/reliability-plan.md)
+failed. Its stricter acceptance criteria, broader support-inventory scope, and earlier accepted
+examples remain historical records, not evidence of reliability under the current binary verdict.
 The [backend verification guide](backend/README.md#verification) includes fresh-run
 and saved-run refinement commands.
 

@@ -1,7 +1,7 @@
 # Jigsaw implementation design: independent review record
 
-Date: 2026-09-13  
-Reviewed document: [autonomous BOM selection and compatibility review](practical-bom-workflow.md)  
+Date: 2026-09-13\
+Reviewed document: [autonomous BOM selection and compatibility review](practical-bom-workflow.md)\
 Disposition at review time: ready for implementation; no unresolved material architecture findings
 
 Historical pre-implementation review, preserved as recorded on 2026-09-13. The linked
