@@ -21,6 +21,12 @@ node_modules/
 # Environment variables
 .env
 *.env
+.env.*
+!.env.example
+!.env.template
+
+# Local design previews, screenshots, and QA records
+/output/
 
 # Local backend runtime and Python environment
 backend/data/
