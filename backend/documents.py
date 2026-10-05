@@ -16,7 +16,7 @@ import unicodedata
 from datetime import datetime, timezone
 from html.parser import HTMLParser
 from pathlib import Path
-from urllib.parse import parse_qs, urljoin, urlsplit, urlunsplit
+from urllib.parse import parse_qs, unquote, urljoin, urlsplit, urlunsplit
 
 import requests
 import urllib3
@@ -35,7 +35,7 @@ def _normalize_lines(value):
     return "\n".join(_normalize_text(line) for line in value.splitlines())
 
 
-def _links(values, base_url):
+def _resolve_links(values, base_url):
     resolved = (urljoin(base_url, value) for value in values if value)
     return list(dict.fromkeys(url for url in resolved if urlsplit(url).scheme == "https"))
 
@@ -103,7 +103,7 @@ class DocumentStore:
         self._inventories = {}
 
     @staticmethod
-    def _target(url):
+    def _resolve_target(url):
         """Resolve once, reject nonpublic addresses, and pin the chosen address."""
         if not isinstance(url, str) or re.search(r"[\x00-\x20\\]", url):
             raise DocumentError("Invalid document URL")
@@ -136,7 +136,7 @@ class DocumentStore:
             raise DocumentError("Document deadline exhausted")
         deadline = time.monotonic() + timeout
         for redirect_count in range(self.max_redirects + 1):
-            parsed, hostname, port, address = self._target(url)
+            parsed, hostname, port, address = self._resolve_target(url)
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise DocumentError("Document deadline exhausted")
@@ -145,19 +145,20 @@ class DocumentStore:
             if hostname in {"ti.com", "www.ti.com"} and parsed.path == "/general/docs/suppproductinfo.tsp":
                 destinations = parse_qs(parsed.query).get("gotoUrl", [])
                 try:
-                    target = urlsplit(destinations[0]) if len(destinations) == 1 else None
+                    # Distributor links sometimes encode the TI destination twice.
+                    target = urlsplit(unquote(destinations[0])) if len(destinations) == 1 else None
                 except ValueError as exc:
                     raise DocumentError("Unsupported TI datasheet redirect destination") from exc
                 if (
                     target is None
-                    or target.scheme != "https"
+                    or target.scheme not in {"http", "https"}
                     or target.hostname not in {"ti.com", "www.ti.com"}
                     or not target.path.startswith("/lit/")
                 ):
                     raise DocumentError("Unsupported TI datasheet redirect destination")
                 if redirect_count == self.max_redirects:
                     raise DocumentError("Document redirect limit reached")
-                url = destinations[0]
+                url = urlunsplit(target._replace(scheme="https"))
                 continue  # The next iteration applies the usual public HTTPS validation.
             host_header = f"[{hostname}]" if ":" in hostname else hostname
             if port != 443:
@@ -231,7 +232,7 @@ class DocumentStore:
         try:
             if b"%PDF-" in data[:1024] or media_type == "application/pdf":
                 media_type = "application/pdf"
-                reader = self._pdf(data)
+                reader = self._read_pdf(data)
                 page_count = len(reader.pages)
                 title = str((reader.metadata or {}).get("/Title", ""))
                 extension = "pdf"
@@ -240,7 +241,7 @@ class DocumentStore:
                 media_type = "text/html"
                 charset = re.search(r"charset\s*=\s*[\"']?([^;\s\"']+)", content_type, re.I)
                 encoding = charset.group(1) if charset else "utf-8"
-                parser = self._html(data, encoding)
+                parser = self._parse_html(data, encoding)
                 title = _normalize_text(" ".join(parser.title))
                 page_count, extension = 1, "html"
             else:
@@ -259,8 +260,8 @@ class DocumentStore:
                 "page_count": page_count,
                 "encoding": encoding,
             }
-            self._write(self.cache_dir / f"{document_id}.{extension}", data)
-            self._write(self.cache_dir / f"{document_id}.json", json.dumps(record).encode("utf-8"))
+            self._write_atomic(self.cache_dir / f"{document_id}.{extension}", data)
+            self._write_atomic(self.cache_dir / f"{document_id}.json", json.dumps(record).encode("utf-8"))
             self._inventories.pop(document_id, None)
             return record
         except DocumentError:
@@ -269,7 +270,7 @@ class DocumentStore:
             raise DocumentError("Could not cache document") from exc
 
     @staticmethod
-    def _write(path, data):
+    def _write_atomic(path, data):
         temporary = path.with_suffix(path.suffix + ".tmp")
         temporary.write_bytes(data)
         temporary.replace(path)
@@ -290,7 +291,7 @@ class DocumentStore:
             raise DocumentError("Cached document is unavailable") from exc
 
     @staticmethod
-    def _pdf(data):
+    def _read_pdf(data):
         try:
             reader = PdfReader(io.BytesIO(data))
             if reader.is_encrypted and not reader.decrypt(""):
@@ -302,7 +303,7 @@ class DocumentStore:
             raise DocumentError("PDF could not be read") from exc
 
     @staticmethod
-    def _html(data, encoding):
+    def _parse_html(data, encoding):
         parser = _HTMLSource()
         try:
             parser.feed(data.decode(encoding or "utf-8", errors="replace"))
@@ -318,7 +319,7 @@ class DocumentStore:
         record, data = self._load(document_id)
         pages = []
         if record["media_type"] == "application/pdf":
-            for number, page in enumerate(self._pdf(data).pages, 1):
+            for number, page in enumerate(self._read_pdf(data).pages, 1):
                 text, status, links = "", "empty", []
                 try:
                     text = page.extract_text() or ""
@@ -339,12 +340,12 @@ class DocumentStore:
                         "text": text,
                         "text_status": status,
                         "headings": [line.strip() for line in text.splitlines() if line.strip()][:12],
-                        "links": _links(links, record["url"]),
+                        "links": _resolve_links(links, record["url"]),
                         "figure_urls": [],
                     }
                 )
         else:
-            parser = self._html(data, record.get("encoding"))
+            parser = self._parse_html(data, record.get("encoding"))
             text = _normalize_lines("".join(parser.text))
             pages.append(
                 {
@@ -353,8 +354,8 @@ class DocumentStore:
                     "text": text,
                     "text_status": "available" if text.strip() else "empty",
                     "headings": parser.headings,
-                    "links": _links(parser.links, record["url"]),
-                    "figure_urls": _links(parser.figures, record["url"]),
+                    "links": _resolve_links(parser.links, record["url"]),
+                    "figure_urls": _resolve_links(parser.figures, record["url"]),
                 }
             )
         result = {
@@ -377,7 +378,7 @@ class DocumentStore:
             raise DocumentError("Choose valid one-based physical page numbers")
         selected = list(dict.fromkeys(page_numbers))
         record, data = self._load(document_id)
-        reader = self._pdf(data) if record["media_type"] == "application/pdf" else None
+        reader = self._read_pdf(data) if record["media_type"] == "application/pdf" else None
         blocks = []
         for original_number in selected:
             page = inventory["pages"][original_number - 1]

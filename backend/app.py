@@ -8,11 +8,12 @@ import os
 from pathlib import Path
 from threading import Lock
 
+from checks import update_outcomes
 from documents import DocumentStore
 from dotenv import load_dotenv
 from flask import Flask, Response, jsonify, request, stream_with_context
 from flask_cors import CORS
-from models import AnalysisRequest, DesignRun, RefinementRequest, Usage, now
+from models import AnalysisRequest, DesignRun, RefinementRequest, Usage
 from pipeline import Workflow
 from pydantic import ValidationError
 from run_store import RunStore, export_csv, export_json, run_snapshot
@@ -42,6 +43,11 @@ def create_app(store=None, workflow=None):
             if not released:
                 released = True
                 admission.release()
+
+        def stop_run(lifecycle, reason):
+            run.lifecycle, run.terminal_reason = lifecycle, reason
+            run.review_completed = False
+            update_outcomes(run)
 
         try:
             store.save(run)
@@ -84,15 +90,11 @@ def create_app(store=None, workflow=None):
                 if iterator is not None:
                     iterator.close()
                 if not terminal_sent:
-                    run.lifecycle, run.compatibility = "interrupted", "incomplete"
-                    run.review_completed = False
-                    run.terminal_reason = "Client disconnected; no automatic background continuation"
+                    stop_run("interrupted", "Client disconnected; no automatic background continuation")
                 raise
             except Exception:
                 logger.exception("Run could not finish or persist")
-                run.lifecycle, run.compatibility = "error", "incomplete"
-                run.review_completed = False
-                run.terminal_reason = "Run failed while executing or saving; retrieve the last saved snapshot"
+                stop_run("error", "Run failed while executing or saving; retrieve the last saved snapshot")
                 try:
                     store.save(run)
                 except Exception:
@@ -104,7 +106,6 @@ def create_app(store=None, workflow=None):
                     if iterator is not None:
                         iterator.close()
                     if not terminal_sent and run.lifecycle in {"interrupted", "error"}:
-                        run.updated_at = now()
                         store.save(run)
                 except Exception:
                     logger.exception("Final snapshot unavailable")
@@ -124,9 +125,7 @@ def create_app(store=None, workflow=None):
         # Also release when a response is closed without starting its generator.
         def closed():
             if not released:
-                run.lifecycle, run.compatibility = "interrupted", "incomplete"
-                run.review_completed = False
-                run.terminal_reason = "Response closed before completion"
+                stop_run("interrupted", "Response closed before completion")
                 try:
                     store.save(run)
                 finally:
@@ -157,7 +156,7 @@ def create_app(store=None, workflow=None):
         body = RefinementRequest.model_validate(request.get_json(silent=True) or {})
         try:
             base = store.load(body.base_run_id)
-        except FileNotFoundError:
+        except (FileNotFoundError, ValueError):
             return jsonify(error="Base run not found"), 404
         if base.lifecycle == "running":
             return jsonify(error="The base run is still running"), 409

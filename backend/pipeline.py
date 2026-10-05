@@ -8,13 +8,12 @@ import re
 import time
 from datetime import datetime, timezone
 from typing import Literal
-from urllib.parse import urlsplit
 
 from checks import refresh_checks
 from documents import DocumentError
 from llm import Budget, BudgetExceeded, ModelGateway
 from models import (
-    CircuitProposal,
+    OperatingConfiguration,
     Component,
     Correction,
     DesignRun,
@@ -24,10 +23,9 @@ from models import (
     PageSelection,
     Product,
     ReadingPlan,
-    SupportNeed,
     now,
 )
-from prompts import ASSEMBLE, CORRECT, EXTRACT, READ
+from prompts import CONFIGURE, CORRECT, EXTRACT, READ, USB_C_GUIDE_URL
 from pydantic import Field, create_model
 from pydantic.json_schema import SkipJsonSchema
 from run_store import design_context
@@ -87,12 +85,6 @@ def compact_inventory(inventory, max_chars=10000):
     return result
 
 
-def peripheral_schematic_pages(inventory):
-    """Recognize an explicit leading external-support heading, not a TOC/footer mention."""
-    heading = r"^\s*(?:\d+(?:\.\d+)*[.)]?\s*)?Peripheral\s*Schematics[^\S\r\n]*(?:\r?\n|$)"
-    return [page["page_number"] for page in inventory["pages"] if re.match(heading, page["text"][:250], re.I)]
-
-
 def merge_page_selections(selections):
     """Keep each original source page once, in first-document order."""
     merged = {}
@@ -115,7 +107,7 @@ class Workflow:
         self.supplier = supplier or SupplierClient()
         self.gateway = gateway or ModelGateway()
 
-    def _inventories(self, run, document_ids=None, max_chars=10000):
+    def _build_source_inventories(self, run, document_ids=None, max_chars=10000):
         current = {key for component in run.components for key in component.document_ids}
         if document_ids is not None:
             current &= document_ids
@@ -139,7 +131,6 @@ class Workflow:
         """Even same-document replacements must not inherit another variant's facts."""
         for field, owners_field in (
             ("evidence", "component_ids"),
-            ("source_support_needs", "parent_ids"),
             ("evidence_errors", "subject_ids"),
         ):
             kept = []
@@ -148,13 +139,14 @@ class Workflow:
                 if owners:
                     kept.append(item.model_copy(update={owners_field: owners}))
             setattr(run, field, kept)
-        for need in run.support_needs:
-            if set(need.parent_ids) & identifiers:
-                need.status = "unresolved"
 
-    def _select_components(self, run, budget):
+    def _select_components(self, run, budget, component_ids=None):
         run.stage = "select"
-        pending = [c for c in run.components if c.product is None]
+        pending = [
+            c
+            for c in run.components
+            if c.product is None and (component_ids is None or c.id in component_ids)
+        ]
         cache = {}
         for attempt in range(2):
             if not pending:
@@ -176,6 +168,8 @@ class Workflow:
                             timeout=min(20, budget.remaining()),
                             limit=3,
                         )
+                    if not cache[query]:
+                        component.selection_error = f"No catalog results for {query!r}; try a different part or query"
                     candidates[component.id] = []
                     for candidate in cache[query]:
                         mismatch = find_capacitance_mismatch(component, candidate)
@@ -216,18 +210,10 @@ class Workflow:
                         raise SupplierError("Product details did not match the selected manufacturer and MPN")
                     if mismatch := find_capacitance_mismatch(component, product.model_dump()):
                         raise SupplierError(mismatch)
-                    source = urlsplit(product.datasheet_url or "")
-                    if component.kind in {"active", "module"} and not (
-                        source.scheme in {"https", "http"} and source.netloc
-                    ):
-                        raise SupplierError(
-                            "Active part has no datasheet source locator; select a documented alternative"
-                        )
                     component.product = product
                     component.name = product.mpn
-                    # Planning hints describe a proposal, not necessarily the actual
-                    # catalog variant. Discover any extra guides after this selection.
-                    component.document_urls = []
+                    # Source leads remain untrusted hints until extraction verifies
+                    # their applicability to the actual selected catalog variant.
                     component.selection_reason = pick.reason
                     component.selection_error = None
                 except (SupplierError, ValueError) as error:
@@ -239,13 +225,18 @@ class Workflow:
 
     def _fetch_documents(self, run, budget, requested_component_ids=()):
         existing = {url: d for d in run.documents for url in [d["url"], d.get("requested_url", "")]}
-        added = False
         for component in run.components:
             if not component.product or component.kind == "passive" and component.id not in requested_component_ids:
                 continue
             urls = [component.product.datasheet_url, *component.document_urls]
             if not any(urls) and component.product.product_url:
                 urls = [component.product.product_url]
+            if component.kind == "connector" and any(
+                str(parameter.get("name", "")).strip().casefold() == "connector type"
+                and re.search(r"USB[- ](?:TYPE[- ])?C\b", str(parameter.get("value", "")), re.I)
+                for parameter in component.product.parameters
+            ):
+                urls.append(USB_C_GUIDE_URL)
             component.document_errors = []
             for url in dict.fromkeys(u for u in urls if u):
                 # Catalog often returns an HTTP locator for an HTTPS manufacturer site.
@@ -265,17 +256,15 @@ class Workflow:
                         if metadata["document_id"] not in {d["document_id"] for d in run.documents}:
                             run.documents.append(metadata)
                         existing[url] = next(d for d in run.documents if d["document_id"] == metadata["document_id"])
-                        added = True
                     document_id = existing[url]["document_id"]
                     if document_id not in component.document_ids:
                         component.document_ids.append(document_id)
                 except DocumentError as error:
-                    component.document_errors.append(str(error))
+                    component.document_errors.append(f"{url}: {error}")
             if not component.document_ids:
                 component.document_errors.append("No usable manufacturer source was found")
-        return added
 
-    def _source_blocks(self, run, selections, *, include_pdf_text=True):
+    def _build_source_blocks(self, run, selections, *, include_pdf_text=True):
         blocks, pdf_pages = [], 0
         metadata = {d["document_id"]: d for d in run.documents}
         for selection in selections:
@@ -291,7 +280,7 @@ class Workflow:
         return blocks, pdf_pages
 
     @staticmethod
-    def _mark_read(run, selections):
+    def _mark_pages_read(run, selections):
         metadata = {d["document_id"]: d for d in run.documents}
         for selection in selections:
             document = metadata[selection.document_id]
@@ -307,14 +296,14 @@ class Workflow:
             component = components[request.component_id]
             if request.url not in component.document_urls:
                 component.document_urls.append(request.url)
-        yield from self._fetch_documents(run, budget)
+        yield from self._fetch_documents(run, budget, {request.component_id for request in requests})
 
     def _plan_source_reads(self, run, budget, instructions="", document_ids=None):
         for attempt in range(2):
             current_documents = {key for component in run.components for key in component.document_ids}
             if document_ids is not None:
                 current_documents &= document_ids
-            inventories = self._inventories(run, current_documents)
+            inventories = self._build_source_inventories(run, current_documents)
             result = yield from self.gateway.call(
                 budget,
                 "choose evidence pages",
@@ -338,7 +327,6 @@ class Workflow:
                     "documents": inventories,
                     "reading_scope": "Choose pages from these inventories; previously read unchanged sources remain in the evidence ledger.",
                     "existing_observations": run.evidence,
-                    "existing_source_support": run.source_support_needs,
                     "source_reading_issues": run.evidence_errors,
                     "issues_to_resolve": [
                         {"subject_ids": f.subject_ids, "explanation": f.explanation, "remedy": f.remedy}
@@ -380,34 +368,12 @@ class Workflow:
                 )
             )
         )
-        module_documents = {
-            key
-            for component in run.components
-            if component.product and component.kind == "module"
-            for key in component.document_ids
-        } & current_documents
-        requested_documents = {selection.document_id for selection in requested}
-        for document in run.documents:
-            identifier = document["document_id"]
-            if identifier not in module_documents:
-                continue
-            pages = peripheral_schematic_pages(self.documents.inventory(identifier))
-            if identifier not in requested_documents:
-                pages = [page for page in pages if page not in document.get("pages_interpreted", [])]
-            if pages:
-                requested.append(
-                    PageSelection(
-                        document_id=identifier,
-                        pages=pages,
-                        reason="Explicit Peripheral Schematics heading: inspect external support values/counts, not wiring",
-                    )
-                )
         selections = merge_page_selections(requested)
         if sum(len(selection.pages) for selection in selections) > 24:
             raise BudgetExceeded("Initial reading plan exceeds 24 pages")
         return selections
 
-    def _verify_evidence(self, run, items, component_ids, document_id=None):
+    def _filter_evidence(self, run, items, component_ids, document_id=None):
         metadata = {d["document_id"]: d for d in run.documents}
         verified, issues = [], []
         for evidence in items:
@@ -444,8 +410,7 @@ class Workflow:
         return verified, issues
 
     def _apply_configuration(self, run, proposal):
-        self._assert_unique_ids(proposal.additional_components, "support component")
-        self._assert_unique_ids(proposal.support_needs, "support need")
+        self._assert_unique_ids(proposal.additional_components, "additional component")
         known = {c.id for c in run.components}
         for spec in proposal.additional_components:
             if spec.id not in known:
@@ -454,7 +419,6 @@ class Workflow:
         if len(run.components) > run.limits.bom_rows:
             raise BudgetExceeded("Design exceeds the supported BOM size")
         for field in (
-            "support_needs",
             "rails",
             "interfaces",
             "signal_checks",
@@ -463,21 +427,6 @@ class Workflow:
             "configuration_notes",
         ):
             setattr(run, field, getattr(proposal, field))
-        fulfilled_ids = {need.id for need in run.support_needs}
-        for source in run.source_support_needs:
-            if source.id not in fulfilled_ids:
-                run.support_needs.append(
-                    SupportNeed(
-                        id=source.id,
-                        purpose=source.purpose,
-                        parent_ids=source.parent_ids,
-                        necessity=source.necessity,
-                        status="unresolved",
-                        connections=source.connection_requirement,
-                        evidence_ids=source.evidence_ids,
-                        explanation="Source-observed support was not resolved by the BOM proposal",
-                    )
-                )
         run.invalidate_review()
 
     def _extract_evidence(self, run, budget, selections, instructions):
@@ -507,18 +456,13 @@ class Workflow:
             for item in run.evidence_errors
             if (owners := current_ids(item.document_id, item.subject_ids))
         ]
-        run.source_support_needs = [
-            item.model_copy(update={"parent_ids": owners})
-            for item in run.source_support_needs
-            if (owners := current_ids(item.document_id, item.parent_ids))
-        ]
         document_numbers = {d["document_id"]: index for index, d in enumerate(run.documents, 1)}
         for selection in selections:
             index = document_numbers[selection.document_id]
             owners = [c for c in run.components if c.product and selection.document_id in c.document_ids]
             if not owners:
                 continue
-            blocks, page_count = self._source_blocks(run, [selection])
+            blocks, page_count = self._build_source_blocks(run, [selection])
             page_type = Literal[tuple(sorted(set(selection.pages)))]
             observation = create_model(
                 "SourceObservation",
@@ -545,7 +489,6 @@ class Workflow:
                             "purpose": c.purpose,
                         }
                         for c in owners
-                        if c.product
                     ],
                     "needed_facts": selection.reason,
                     "correction_instructions": instructions,
@@ -553,30 +496,28 @@ class Workflow:
                     "latest_modification": run.modification,
                     "operating_assumptions": run.assumptions,
                     "previous_observations": [e for e in run.evidence if e.document_id == selection.document_id],
-                    "previous_source_support": [
-                        need for need in run.source_support_needs if need.document_id == selection.document_id
-                    ],
                     "id_prefix": f"D{index}E",
                     "original_physical_pages": selection.pages,
                 },
                 blocks,
-                max_output=4000,
+                max_output=5500,
                 pdf_pages=page_count,
             )
-            self._mark_read(run, [selection])
+            self._mark_pages_read(run, [selection])
             self._assert_unique_ids(packet.evidence, "source evidence")
-            reference_map = {item.id: f"D{index}E{number}" for number, item in enumerate(packet.evidence, 1)}
-            for item in packet.evidence:
-                item.id = reference_map[item.id]
-            for number, need in enumerate(packet.source_support_needs, 1):
-                need.id, need.document_id = f"D{index}S{number}", selection.document_id
-                need.evidence_ids = [reference_map.get(key, f"missing:{key}") for key in need.evidence_ids]
-            applicable = {key for key, reason in packet.applicability.items() if reason.strip()} & {
-                c.id for c in owners
-            }
-            valid, rejected = self._verify_evidence(run, packet.evidence, applicable, selection.document_id)
+            for index_in_packet, item in enumerate(packet.evidence, 1):
+                item.id = f"D{index}E{index_in_packet}"
+                for number, operand in enumerate(item.numbers, 1):
+                    operand.id = f"{item.id}N{number}"
+            owner_ids = {c.id for c in owners}
+            applicable = {
+                key for key, match in packet.applicability.items() if match.applies and match.reason.strip()
+            } & owner_ids
+            valid, rejected = self._filter_evidence(run, packet.evidence, applicable, selection.document_id)
             metadata = next(d for d in run.documents if d["document_id"] == selection.document_id)
-            metadata["applicability"] = {key: packet.applicability[key] for key in applicable}
+            metadata["applicability"] = {
+                key: match.reason for key, match in packet.applicability.items() if key in owner_ids
+            }
             errors = [error for error in run.evidence_errors if error.document_id != selection.document_id]
             errors.extend(rejected)
             errors.extend(
@@ -595,31 +536,32 @@ class Workflow:
                 for number, missing in enumerate(packet.missing_facts, 1)
             )
             run.evidence = [e for e in run.evidence if e.document_id != selection.document_id] + valid
-            run.source_support_needs = [
-                need for need in run.source_support_needs if need.document_id != selection.document_id
-            ] + packet.source_support_needs
             metadata["pages_interpreted"] = sorted(set(selection.pages))
             run.evidence_errors = errors
             yield self._snapshot(run)
 
-    def _assemble_bom(self, run, budget, instructions=""):
+    def _configure_bom(self, run, budget, instructions=""):
         run.stage = "evidence"
         proposal = yield from self.gateway.call(
             budget,
-            "complete BOM and compatibility",
-            CircuitProposal,
-            ASSEMBLE,
+            "configure operating compatibility",
+            OperatingConfiguration,
+            CONFIGURE,
             {"design": design_context(run), "correction_instructions": instructions},
             max_output=7000,
         )
+        known = {c.id for c in run.components}
         self._apply_configuration(run, proposal)
-        yield from self._select_components(run, budget)
+        # Existing selection failures await an explicit correction, not another configuration pass.
+        added = {c.id for c in run.components} - known
+        yield from self._select_components(run, budget, component_ids=added)
         run.stage = "evidence"
         yield self._snapshot(run)
+        return added
 
-    def _complete_bom(self, run, budget, instructions="", source_component_ids=None):
+    def _source_and_configure(self, run, budget, instructions="", source_component_ids=None):
         run.stage = "evidence"
-        # Repeat only if synthesis introduces an active/connector part needing its own source.
+        # Repeat only when configuration adds a functional component needing its own source.
         selections = [
             PageSelection(
                 document_id=key,
@@ -631,11 +573,9 @@ class Workflow:
         inspected_parts = {
             c.id for c in run.components if source_component_ids is not None and c.id not in source_component_ids
         }
-        for support_pass in range(3):
+        for dependency_pass in range(3):
             yield from self._fetch_documents(run, budget, source_component_ids or ())
-            if not run.documents:
-                return []
-            if not support_pass:
+            if not dependency_pass:
                 new_documents = (
                     None
                     if source_component_ids is None
@@ -643,9 +583,18 @@ class Workflow:
                 )
             else:
                 new_documents = {key for c in run.components if c.id not in inspected_parts for key in c.document_ids}
-            if new_documents == set():
+            missing_source = any(
+                c.product
+                and c.id not in inspected_parts
+                and not c.document_ids
+                and (c.kind != "passive" or c.id in (source_component_ids or ()))
+                for c in run.components
+            )
+            if (not run.documents or new_documents == set()) and not missing_source:
                 return selections
             reading = yield from self._plan_source_reads(run, budget, instructions, new_documents)
+            if not run.documents:
+                return selections
             # A shared family source is replaced as one packet; keep the pages
             # supporting its already selected owners when adding another owner.
             for selection in reading:
@@ -658,7 +607,7 @@ class Workflow:
             read_documents = {selection.document_id for selection in reading}
             inspected_parts.update(c.id for c in run.components if c.product and set(c.document_ids) & read_documents)
             selections = merge_page_selections([*selections, *reading])
-            yield from self._assemble_bom(run, budget, instructions)
+            yield from self._configure_bom(run, budget, instructions)
             unread = [
                 c
                 for c in run.components
@@ -678,10 +627,10 @@ class Workflow:
         ]
         selections = merge_page_selections([*selections, *observations])
         for extra_round in range(2):
-            blocks, count = self._source_blocks(run, selections, include_pdf_text=False)
-            inventory = self._inventories(run, max_chars=3000)
+            blocks, count = self._build_source_blocks(run, selections, include_pdf_text=False)
+            inventory = self._build_source_inventories(run, max_chars=3000)
             review = yield from review_bom(self.gateway, budget, run, blocks, count, inventory, prior_requirements)
-            self._mark_read(run, selections)
+            self._mark_pages_read(run, selections)
             if (review.additional_pages or review.document_requests) and extra_round == 0:
                 if review.document_requests:
                     yield from self._fetch_requests(run, budget, review.document_requests)
@@ -689,11 +638,17 @@ class Workflow:
                     selections = selections + discovered
                 selections = merge_page_selections([*selections, *review.additional_pages])
                 continue
+            number_refs = {number.id: item.id for item in run.evidence for number in item.numbers}
             for finding in review.findings:
                 finding.revision = run.revision
                 finding.method = "model_review"
+                # Numerical observations cite their parent evidence; invalid references remain visible.
+                finding.evidence_ids = list(
+                    dict.fromkeys(number_refs.get(key, key) for key in finding.evidence_ids)
+                )
             run.findings = review.findings
-            run.review_completed = not bool(review.additional_pages or review.document_requests)
+            # Exhausting source follow-up does not erase a performed review.
+            run.review_completed = True
             break
         yield self._snapshot(run)
         return selections
@@ -715,7 +670,7 @@ class Workflow:
             by_id[spec.id] = Component(**spec.model_dump())
         requirements = {requirement.id: requirement for requirement in run.requirements}
         for identifier, component_ids in correction.requirement_components.items():
-            if identifier not in requirements or not component_ids or not set(component_ids) <= by_id.keys():
+            if identifier not in requirements or not set(component_ids) <= by_id.keys():
                 raise ValueError("Requirement mapping must name an existing requirement and current component IDs")
         if not set(correction.reread_component_ids) <= by_id.keys():
             raise ValueError("Source reread must name current component IDs")
@@ -791,7 +746,7 @@ class Workflow:
         run.configuration_notes, run.pending_questions = plan.configuration_notes, plan.pending_questions
         run.invalidate_review()
 
-    def _complete_correction(self, run, budget, correction, selections, source_gaps, catalog_reviewed):
+    def _complete_correction(self, run, budget, correction, selections):
         """Reread only when parts or material evidence changed; otherwise reuse sources."""
         parts_changed = bool(
             correction.replace_components or correction.add_components or correction.remove_component_ids
@@ -799,22 +754,26 @@ class Workflow:
         instructions = correction.configuration_instructions
         if not parts_changed and correction.reread_component_ids:
             return (
-                yield from self._complete_bom(
+                yield from self._source_and_configure(
                     run, budget, instructions, source_component_ids=set(correction.reread_component_ids)
                 )
             )
-        if parts_changed or source_gaps:
-            return (yield from self._complete_bom(run, budget, instructions))
+        if parts_changed:
+            return (yield from self._source_and_configure(run, budget, instructions))
         if instructions.strip():
-            yield from self._assemble_bom(run, budget, instructions)
+            added = yield from self._configure_bom(run, budget, instructions)
             if any(
-                c.product and c.kind != "passive" and not c.document_ids and c.id not in catalog_reviewed
+                c.id in added and c.product and c.kind != "passive"
                 for c in run.components
             ):
-                return (yield from self._complete_bom(run, budget, instructions))
+                return (yield from self._source_and_configure(run, budget, instructions))
         return selections
 
     def execute(self, run: DesignRun):
+        run.numeric_binding_version = 1
+        # A refinement starts a new review, not the historical support-completeness workflow.
+        run.source_support_needs = []
+        run.support_needs = []
         budget = Budget(run)
         prior_requirements = [requirement.model_dump() for requirement in run.requirements] if run.parent_run_id else []
         try:
@@ -837,37 +796,16 @@ class Workflow:
             if not run.components or not run.requirements:
                 run.terminal_reason = "No supported device requirements or component plan"
                 return
-            run.stage = "select"
             yield from self._select_components(run, budget)
-            run.stage = "evidence"
-            selections = yield from self._complete_bom(run, budget)
-            if not selections:
-                run.terminal_reason = "Required manufacturer evidence is unavailable"
-                return
+            selections = yield from self._source_and_configure(run, budget)
             last_correction = None
             while True:
                 yield self._snapshot(run)
                 selections = yield from self._review_bom(run, budget, selections, prior_requirements)
-                if run.compatibility == "checked":
+                if run.compatibility != "issues_found":
                     break
                 if run.usage.correction_rounds >= run.limits.correction_rounds:
                     break
-                catalog_reviewed = {
-                    f.id.removeprefix("code:catalog_source:")
-                    for f in run.findings
-                    if f.method == "code" and f.id.startswith("code:catalog_source:") and f.status == "pass"
-                }
-                source_gaps = any(
-                    f.kind == "check"
-                    and f.area == "evidence"
-                    and f.id != "code:review_coverage"
-                    and f.status in {"fail", "unknown"}
-                    for f in run.findings
-                )
-                interpreted = {d["document_id"]: set(d.get("pages_interpreted", [])) for d in run.documents}
-                source_gaps = source_gaps or any(
-                    set(s.pages) - interpreted.get(s.document_id, set()) for s in selections
-                )
                 correction_schema = Correction
                 if any(component.product is None for component in run.components):
                     correction_schema = create_model(
@@ -903,15 +841,14 @@ class Workflow:
                 yield from self._select_components(run, budget)
                 if correction.configuration is not None:
                     continue
-                selections = yield from self._complete_correction(
-                    run, budget, correction, selections, source_gaps, catalog_reviewed
-                )
+                selections = yield from self._complete_correction(run, budget, correction, selections)
             # New and refreshed offers remain within the 15-minute policy during an eight-minute run.
-            run.terminal_reason = run.terminal_reason or (
-                "Review complete"
-                if run.compatibility == "checked"
-                else "Correction allowance reached; unresolved findings remain"
-            )
+            if not run.terminal_reason:
+                run.terminal_reason = {
+                    "checked": "Checks passed",
+                    "issues_found": "Checks failed; correction allowance reached",
+                    None: "No review findings were returned",
+                }[run.compatibility]
         except BudgetExceeded as error:
             run.terminal_reason = str(error)
         except GeneratorExit:

@@ -169,28 +169,29 @@ class ModelGateway:
                     if secret:
                         message = message.replace(secret, "[redacted]")
                 quota_exhausted = "429" in message or "RESOURCE_EXHAUSTED" in message
-                transient = quota_exhausted or any(
+                if quota_exhausted:
+                    # Do not hammer a quota-exhausted provider or hide requests in SDK retries.
+                    raise ModelError(
+                        "Model quota exhausted; saved a partial result. Retry after quota resets"
+                    ) from error
+                timed_out = isinstance(error, TimeoutError) or "timed out" in message.lower()
+                transient = timed_out or any(
                     code in message for code in ("500", "502", "503", "504", "UNAVAILABLE")
                 )
                 malformed = isinstance(error, (ModelError, ValidationError))
-                if not attempt and (transient or malformed):
-                    if transient:
-                        # Do not hammer a quota-exhausted provider or hide requests in SDK retries.
-                        if quota_exhausted:
-                            raise ModelError(
-                                "Model quota exhausted; saved a partial result. Retry after quota resets"
-                            ) from error
-                        yield {
-                            "type": "progress",
-                            "stage": stage,
-                            "message": "Provider temporarily unavailable; retrying once",
-                        }
+                if attempt or not (transient or malformed):
+                    raise ModelError(message[:500]) from error
+                if transient:
+                    yield {
+                        "type": "progress",
+                        "stage": stage,
+                        "message": "Provider temporarily unavailable; retrying once",
+                    }
+                    if not timed_out:
                         time.sleep(min(2, budget.remaining()))
-                    else:
-                        messages.append(
-                            HumanMessage(
-                                content=f"Schema rejection: {message[:500]}. Return a complete valid response matching the requested schema."
-                            )
+                else:
+                    messages.append(
+                        HumanMessage(
+                            content=f"Schema rejection: {message[:500]}. Return a complete valid response matching the requested schema."
                         )
-                    continue
-                raise ModelError(message[:500]) from error
+                    )

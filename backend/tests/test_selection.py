@@ -1,14 +1,61 @@
-"""Catalog nominal-value checks with local candidates, never a supplier network."""
+"""Bounded catalog selection and value checks using local candidates."""
 
 import unittest
 
+from fakes import Gateway, component_spec, configuration_for
 from llm import Budget
-from models import Component, DesignRun, Pick, Picks
+from models import Component, Correction, DesignRun, OperatingConfiguration, Pick, Picks
 from pipeline import Workflow
 from stages import find_capacitance_mismatch
 
 
 class SelectionTests(unittest.TestCase):
+    def test_configuration_selects_only_new_parts_and_correction_can_retry_old_parts(self):
+        old = Component(
+            id="R1", name="Old", kind="passive", purpose="Pull-up", search_query="old", selection_error="No fit"
+        )
+        new = Component(
+            id="R2", name="New", kind="passive", purpose="Pull-up", search_query="new", broad_query="new broad"
+        )
+        run = DesignRun(original_request="Two explicitly requested resistors", components=[old])
+        proposal = configuration_for(run)
+        proposal.additional_components = [component_spec(old), component_spec(new)]
+        product = dict(manufacturer="Example", mpn="RES-1", retrieved_at="2026-09-14T00:00:00Z")
+        queries = []
+
+        class Supplier:
+            def search(self, query, **kwargs):
+                queries.append(query)
+                return [product] if query in {"new broad", "repaired"} else []
+
+            def get_product(self, identifier, **kwargs):
+                return product
+
+        gateway = Gateway(
+            {
+                OperatingConfiguration: proposal,
+                Picks: lambda payload, blocks: Picks(
+                    picks=[
+                        Pick(component_id=key, chosen_index=0, reason="Local candidate")
+                        for group in payload["candidate_groups"]
+                        for key in group["component_ids"]
+                    ]
+                ),
+            }
+        )
+        workflow = Workflow(object(), Supplier(), gateway)
+        budget = Budget(run)
+        list(workflow._configure_bom(run, budget))
+        self.assertEqual(queries, ["new", "new broad"])
+        self.assertIsNone(run.components[0].product)
+        self.assertEqual(run.components[1].product.mpn, "RES-1")
+
+        replacement = component_spec(old).model_copy(update={"search_query": "repaired"})
+        workflow._apply_correction(run, Correction(reason="Different query", replace_components=[replacement]))
+        list(workflow._select_components(run, budget))
+        self.assertEqual(queries, ["new", "new broad", "repaired"])
+        self.assertEqual(run.components[0].product.mpn, "RES-1")
+
     def test_capacitance_equivalence_mismatch_and_uninterpreted_queries(self):
         component = Component(
             id="C1", name="Bypass", kind="passive", purpose="Bypass", search_query="100nF 16V capacitor"

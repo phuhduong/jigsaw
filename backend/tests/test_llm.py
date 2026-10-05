@@ -25,8 +25,11 @@ class LocalModel:
     def invoke(self, *args, **kwargs):
         self.calls += 1
         self.messages.append(list(args[0]))
+        response = next(self.responses)
+        if isinstance(response, Exception):
+            raise response
         return {
-            "parsed": next(self.responses),
+            "parsed": response,
             "raw": SimpleNamespace(usage_metadata={"input_tokens": 23, "output_tokens": 8}),
         }
 
@@ -56,13 +59,35 @@ class ModelGatewayTests(unittest.TestCase):
         self.assertEqual(self.gateway.model.calls, 2)
         self.assertEqual(self.run.usage.model_calls, 4)
 
-    def test_output_reservation_failure_does_not_consume_other_budgets(self):
-        self.run.limits.output_tokens = 6
-        before = self.run.usage.model_dump(exclude={"elapsed_seconds"})
-        with self.assertRaises(BudgetExceeded):
-            list(self.gateway.call(Budget(self.run), "fixture", Answer, "Return a value", {}, max_output=2))
-        self.assertEqual(self.model.calls, 0)
-        self.assertEqual(self.run.usage.model_dump(exclude={"elapsed_seconds"}), before)
+    def test_timeout_gets_one_retry_but_quota_does_not(self):
+        for responses, expected_calls in (
+            ([TimeoutError("The read operation timed out"), {"value": 7}], 2),
+            ([TimeoutError("timed out"), TimeoutError("timed out")], 2),
+            ([RuntimeError("429 RESOURCE_EXHAUSTED")], 1),
+            ([TimeoutError("timed out"), RuntimeError("429 RESOURCE_EXHAUSTED")], 2),
+        ):
+            with self.subTest(responses=responses):
+                self.gateway.model = LocalModel(responses)
+                operation = self.gateway.call(Budget(self.run), "fixture", Answer, "Return a value", {}, max_output=100)
+                if isinstance(responses[-1], dict):
+                    self.assertEqual(drain(operation).value, 7)
+                else:
+                    with self.assertRaises(ModelError) as caught:
+                        drain(operation)
+                    if "429" in str(responses[-1]):
+                        self.assertIn("Model quota exhausted", str(caught.exception))
+                self.assertEqual(self.gateway.model.calls, expected_calls)
+
+    def test_token_reservation_failure_does_not_consume_other_budgets(self):
+        for field in ("input_tokens", "output_tokens"):
+            with self.subTest(field=field):
+                run = self.run.model_copy(deep=True)
+                setattr(run.limits, field, getattr(run.usage, field) + 1)
+                before = run.usage.model_dump(exclude={"elapsed_seconds"})
+                with self.assertRaisesRegex(BudgetExceeded, field):
+                    list(self.gateway.call(Budget(run), "fixture", Answer, "Return a value", {}, max_output=2))
+                self.assertEqual(self.model.calls, 0)
+                self.assertEqual(run.usage.model_dump(exclude={"elapsed_seconds"}), before)
 
     def test_invalid_field_gets_one_actionable_retry_without_echoing_input(self):
         self.gateway.model = LocalModel(responses=[{"value": "private-invalid-value"}, {"value": 7}])

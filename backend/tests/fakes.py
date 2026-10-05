@@ -3,7 +3,6 @@
 from models import (
     REVIEW_AREAS,
     Assumption,
-    CircuitProposal,
     Component,
     ComponentSpec,
     DesignRun,
@@ -13,6 +12,7 @@ from models import (
     Finding,
     Interface,
     Offer,
+    OperatingConfiguration,
     PageSelection,
     Plan,
     PowerLoad,
@@ -23,9 +23,11 @@ from models import (
     Requirement,
     Review,
     SignalCheck,
+    SourceNumber,
     SourceSupportNeed,
     SupportNeed,
 )
+from numeric import bind_quantities
 from pipeline import Workflow
 
 
@@ -79,11 +81,26 @@ def example():
             kind="text",
             quote="Operating supply 2.7 to 3.6 V",
             fact="Operating supply 2.7–3.6 V",
+            numbers=[
+                SourceNumber(id=f"specN{index}", role=role, value=value, unit=unit, basis=basis)
+                for index, (role, value, unit, basis) in enumerate(
+                    [
+                        ("operating_voltage", 2.7, "V", "min"),
+                        ("operating_voltage", 3.6, "V", "max"),
+                        ("input_current", 10, "mA", "typical"),
+                        ("input_high", 2.3, "V", "min"),
+                        ("input_low", 0.9, "V", "max"),
+                        ("output_low", 0.4, "V", "max"),
+                    ],
+                    1,
+                )
+            ],
         )
     ]
 
     def voltage(value, basis):
-        return Quantity(value=value, unit="V", basis=basis, evidence_ids=["spec"])
+        number = {2.7: 1, 3.6: 2, 2.3: 4, 0.9: 5, 0.4: 6}[value]
+        return Quantity(value=value, unit="V", basis=basis, evidence_ids=["spec"], source_ids=[f"specN{number}"])
 
     run.rails = [
         Rail(
@@ -98,7 +115,9 @@ def example():
                     component_id=key,
                     voltage_min=voltage(2.7, "min"),
                     voltage_max=voltage(3.6, "max"),
-                    current=Quantity(value=10, unit="mA", basis="typical", evidence_ids=["spec"]),
+                    current=Quantity(
+                        value=10, unit="mA", basis="typical", evidence_ids=["spec"], source_ids=["specN3"]
+                    ),
                 )
                 for key in ("U1", "U2")
             ],
@@ -141,7 +160,8 @@ def example():
     return run
 
 
-def supported_example():
+def legacy_support_example():
+    """A saved circuit-completeness-era record, not the current workflow target."""
     run = example()
     run.evidence[0].quote += "; U1 requires a 4.7 uF bypass capacitor."
     run.evidence[0].fact += "; U1 requires a 4.7 uF bypass capacitor."
@@ -213,13 +233,15 @@ def review_for(run):
 
 
 def configuration_for(run):
-    return CircuitProposal(**run.model_dump(include=set(CircuitProposal.model_fields)), additional_components=[])
+    return OperatingConfiguration(**run.model_dump(include=set(OperatingConfiguration.model_fields)), additional_components=[])
 
 
-def workflow_example(*, support=False):
-    run = supported_example() if support else example()
+def workflow_example():
+    run = example()
     run.lifecycle, run.requirements[0].id = "running", "req:one"
     run.documents[0].update(media_type="text/html", pages_interpreted=[1])
+    run.numeric_binding_version = 1
+    bind_quantities(run, {e.id: e for e in run.evidence})
     return run
 
 
@@ -240,17 +262,24 @@ def split_source_example():
                 "pages_interpreted": [1],
             }
         )
-        run.evidence.append(
-            original.model_copy(update={"id": ref, "document_id": identifier, "component_ids": [component.id]})
+        observation = original.model_copy(
+            deep=True, update={"id": ref, "document_id": identifier, "component_ids": [component.id]}
         )
+        for number in observation.numbers:
+            number.id = number.id.replace("spec", ref, 1)
+        run.evidence.append(observation)
         load = next(load for load in run.rails[0].loads if load.component_id == component.id)
         for quantity in (load.voltage_min, load.voltage_max, load.current):
             quantity.evidence_ids = [ref]
+            quantity.source_ids = [key.replace("spec", ref, 1) for key in quantity.source_ids]
         for signal in run.signal_checks:
             if signal.source_component_id == component.id:
                 signal.output_low_max.evidence_ids = [ref]
+                signal.output_low_max.source_ids = [f"{ref}N6"]
             if signal.receiver_component_id == component.id:
                 signal.input_high_min.evidence_ids = signal.input_low_max.evidence_ids = [ref]
+                signal.input_high_min.source_ids = [f"{ref}N4"]
+                signal.input_low_max.source_ids = [f"{ref}N5"]
     run.interfaces[0].evidence_ids = [e.id for e in run.evidence]
     return run
 
@@ -279,9 +308,12 @@ def replacement_packet(payload, blocks):
     owner = payload["components"][0]["id"]
     previous = payload["previous_observations"]
     observation = (previous[0] if previous else example().evidence[0]).model_copy(
+        deep=True,
         update={"component_ids": [owner], "document_id": "replacement" if owner == "U1" else "doc"}
     )
-    return EvidencePacket(applicability={owner: "Exact fixture sensor variant"}, evidence=[observation])
+    return EvidencePacket(
+        applicability={owner: {"applies": True, "reason": "Exact fixture sensor variant"}}, evidence=[observation]
+    )
 
 
 def drain(generator):
@@ -338,9 +370,9 @@ class SeededWorkflow(Workflow):
 
     completion_calls = 0
 
-    def _complete_bom(self, run, budget, instructions="", source_component_ids=None):
+    def _source_and_configure(self, run, budget, instructions="", source_component_ids=None):
         self.completion_calls += 1
         if source_component_ids is not None:
-            return (yield from super()._complete_bom(run, budget, instructions, source_component_ids))
+            return (yield from super()._source_and_configure(run, budget, instructions, source_component_ids))
         yield {"type": "progress"}
         return [PageSelection(document_id=d["document_id"], pages=[1], reason="Local evidence") for d in run.documents]

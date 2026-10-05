@@ -18,7 +18,7 @@ class SupplierError(RuntimeError):
         self.retry_after = retry_after
 
 
-def _rpc_result(response: requests.Response, request_id: int) -> dict:
+def _parse_rpc_result(response: requests.Response, request_id: int) -> dict:
     """Read either MCP's JSON envelope or its complete SSE response."""
     try:
         # MCP JSON and SSE are UTF-8, even when requests defaults text/* to Latin-1.
@@ -95,7 +95,7 @@ class SupplierClient:
             },
             deadline,
         )
-        _rpc_result(response, self._request_id)
+        _parse_rpc_result(response, self._request_id)
         self.session_id = response.headers.get("mcp-session-id")
         if not self.session_id:
             raise SupplierError("MCP initialization omitted its session ID")
@@ -118,7 +118,7 @@ class SupplierClient:
             },
             deadline,
         )
-        result = _rpc_result(response, self._request_id)
+        result = _parse_rpc_result(response, self._request_id)
         try:
             content = next(item["text"] for item in result.get("content", []) if item.get("type") == "text")
             data = json.loads(content)

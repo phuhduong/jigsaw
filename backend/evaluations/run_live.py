@@ -130,8 +130,10 @@ def main():
         and finding.get("kind") == "check"
         and finding.get("status") in {"fail", "unknown"}
     ]
-    print(f"Current failed/unknown checks: {len(unresolved)}")
-    for finding in unresolved:
+    failures = [f for f in unresolved if f.get("status") == "fail" and f.get("area") != "evidence"]
+    print(f"Blocking functional/electrical failures: {len(failures)}")
+    print(f"Nonblocking review details: {len(unresolved) - len(failures)} (retained in the saved report)")
+    for finding in failures:
         print(f"- {finding['status']} [{concise(finding.get('id', ''))}]: {concise(finding.get('explanation', ''))}")
     return 0 if terminal["type"] == "complete" and snapshot.get("compatibility") == "checked" else 1
 

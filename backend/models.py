@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Any, Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic.json_schema import SkipJsonSchema
 
 
@@ -79,7 +79,13 @@ class Product(BaseModel):
 class ComponentSpec(Record):
     id: str = Field(description="Unique placement ID, e.g. U1, U2, C1; never just a category")
     name: str
-    kind: Literal["active", "module", "passive", "connector"]
+    kind: Literal["active", "module", "passive", "connector"] = Field(
+        description=(
+            "BOM source-policy category. active: powered ICs, drivers and amplifiers; module: purchased "
+            "assemblies; passive: resistors, capacitors, dry-contact switches and bare current-limited "
+            "indicator LEDs; connector: connectors. Smart LEDs and LED driver ICs are active, not passive."
+        )
+    )
     purpose: str
     search_query: str = Field(description="Prefer a known exact MPN, otherwise short capability/value query")
     broad_query: str = ""
@@ -99,6 +105,28 @@ class Component(ComponentSpec):
     document_errors: list[str] = Field(default_factory=list)
 
 
+NumberBasis = Literal["min", "max", "typical", "nominal", "estimate", "absolute_maximum"]
+
+
+class SourceNumber(Record):
+    """A source interpretation, never a second set of configuration-authored ratings."""
+
+    id: str
+    role: Literal[
+        "operating_voltage", "output_voltage", "output_tolerance", "input_current", "average_current",
+        "supply_current_required", "output_current", "input_high", "input_low",
+        "output_high", "output_low", "dropout", "theta_ja", "quiescent_current",
+    ] = Field(description="input_current is the mode's peak/design demand. Use average_current only when the source explicitly distinguishes average consumption from peak demand; typical basis alone does not imply average.")
+    value: float
+    unit: str
+    basis: NumberBasis
+    supply_factor: float = Field(
+        default=0,
+        description="For a source formula value + supply_factor * VDD, in volts; e.g. 0.7*VDD uses value=0, factor=0.7. Otherwise zero. Do not substitute nominal VDD.",
+    )
+    conditions: str = Field(default="", description="Exact applicable mode, package, test/load and board/copper conditions")
+
+
 class Evidence(Record):
     id: str
     component_ids: list[str]
@@ -115,19 +143,22 @@ class Evidence(Record):
     )
     fact: str
     conditions: str = ""
+    numbers: list[SourceNumber] = Field(
+        default_factory=list,
+        description="Source-owned numbers needed for power/logic/thermal checks. Separate roles and bounds; ordinary supporting-circuit details remain evidence facts and configuration notes.",
+    )
 
 
 class Quantity(Record):
-    value: float
-    unit: str = Field(description="V, mV, A, mA, uA, W, mW, degC, degC/W, ohm, Hz or kHz as appropriate")
-    basis: Literal["min", "max", "typical", "nominal", "estimate", "absolute_maximum"]
-    evidence_ids: list[str] = Field(
-        default_factory=list,
-        description=(
-            "Cite the Evidence IDs containing THIS parameter/relationship, not a generic pinout. Required for "
-            "device ratings. Every non-null quantity needs these or an explicit assumption_id."
-        ),
-    )
+    value: float = Field(default=0, description="Only authoritative for a declared design assumption, conservative current margin or outward output-voltage margin. Source-bound values are computed by code.")
+    unit: str = Field(default="", description="Assumed value's unit. Code materializes sourced values and units.")
+    basis: SkipJsonSchema[NumberBasis] = "estimate"
+    source_ids: list[str] = Field(default_factory=list, description="SourceNumber IDs, not Evidence IDs. Device ratings must bind the applicable source numbers.")
+    calculation: SkipJsonSchema[Literal["direct", "output_min", "output_max", "input_min", "linear_input"]] = "direct"
+    binding_error: SkipJsonSchema[str] = ""
+    source_conditions: SkipJsonSchema[list[str]] = Field(default_factory=list)
+    # Computed by binding, retained in public reports and historical snapshots.
+    evidence_ids: SkipJsonSchema[list[str]] = Field(default_factory=list)
     assumption_id: str | None = Field(
         default=None,
         description=(
@@ -139,6 +170,8 @@ class Quantity(Record):
 
 # Legacy wiring fields remain readable but are omitted from new schemas and reports.
 class PowerLoad(Record):
+    """A powered device or a passive branch included in the rail's current budget."""
+
     component_id: str
     pin: SkipJsonSchema[str] = Field(default="", exclude=True)
     voltage_min: Quantity | None = Field(
@@ -187,7 +220,13 @@ class Rail(Record):
         ),
     )
     available_current: Quantity | None = None
-    loads: list[PowerLoad] = Field(default_factory=list)
+    loads: list[PowerLoad] = Field(
+        default_factory=list,
+        description=(
+            "Powered devices and current-budget loads. A passive branch may leave both operating-voltage "
+            "bounds null; review must name this rail and load and verify its ratings/current-limiting arrangement."
+        ),
+    )
     evidence_ids: list[str] = Field(default_factory=list)
 
 
@@ -215,6 +254,8 @@ class Interface(Record):
             "separately."
         ),
     )
+    # Read experimental snapshots; this field no longer alters electrical checks.
+    electrical_basis: SkipJsonSchema[str] = Field(default="limits", exclude=True)
 
 
 class SignalCheck(Record):
@@ -226,7 +267,7 @@ class SignalCheck(Record):
         default=None,
         description=(
             "For an open-drain line, derive its static high level from this recorded pull-up rail; leave "
-            "output_high_min null. Pullup connections and rise time still require review."
+            "output_high_min null. State a feasible pull-up/rate/loading assumption, not purchased resistor placements."
         ),
     )
     output_high_min: Quantity | None = None
@@ -241,6 +282,10 @@ class RegulatorCheck(Record):
     input_rail_id: str
     output_rail_id: str
     dropout: Quantity | None = None
+    quiescent_current: Quantity | None = Field(
+        default=None,
+        description="Regulator's own supply/ground current. Bind its source number or disclose a conservative estimate. Code includes it in linear input current and heat.",
+    )
     # Historical scalar is readable, but never exported or used for thermal approval.
     dissipation_limit: SkipJsonSchema[Quantity | None] = Field(default=None, exclude=True)
     ambient_max: Quantity | None = Field(
@@ -277,7 +322,7 @@ class RegulatorCheck(Record):
 
 
 class SourceSupportNeed(Record):
-    """Source-owned external support requirement, separate from BOM fulfillment."""
+    """Historical support-completeness record; no longer generated or checked."""
 
     id: str
     purpose: str
@@ -294,6 +339,8 @@ class SourceSupportNeed(Record):
 
 
 class SupportNeed(Record):
+    """Historical support fulfillment, retained for saved-run readability."""
+
     id: str
     purpose: str
     parent_ids: list[str]
@@ -324,6 +371,11 @@ class Finding(Record):
     explanation: str
     remedy: str = ""
 
+    @property
+    def blocks_review(self) -> bool:
+        """Only explicit functional/electrical failures determine the verdict."""
+        return self.kind == "check" and self.status == "fail" and self.area != "evidence"
+
 
 class Usage(Record):
     model_calls: int = 0
@@ -339,7 +391,7 @@ class Usage(Record):
 class Limits(Record):
     seconds: int = 480
     model_calls: int = 30
-    input_tokens: int = 300000
+    input_tokens: int = 400000
     output_tokens: int = 64000
     supplier_calls: int = 60
     documents: int = 20
@@ -351,19 +403,21 @@ class Limits(Record):
 
 class DesignRun(Record):
     schema_version: int = 1
+    # Old snapshots remain readable. Every executed workflow enables current bindings.
+    numeric_binding_version: int = 0
     id: str = Field(default_factory=lambda: uuid4().hex)
     parent_run_id: str | None = None
     revision: int = 1
     created_at: str = Field(default_factory=now)
     updated_at: str = Field(default_factory=now)
     lifecycle: Literal["running", "needs_input", "finished", "interrupted", "error"] = "running"
-    compatibility: Literal["checked", "issues_found", "incomplete"] = "incomplete"
+    compatibility: Literal["checked", "issues_found"] | None = None
     sourcing: Literal["available", "partial", "unknown"] = "unknown"
     stage: str = "started"
     terminal_reason: str = ""
     model: str = ""
     model_configuration: dict[str, str] = Field(default_factory=dict)
-    prompt_version: str = "27"
+    prompt_version: str = "41"
     original_request: str
     modification: str | None = None
     options: PurchasingOptions = Field(default_factory=PurchasingOptions)
@@ -373,8 +427,9 @@ class DesignRun(Record):
     components: list[Component] = Field(default_factory=list)
     documents: list[dict[str, Any]] = Field(default_factory=list)
     evidence: list[Evidence] = Field(default_factory=list)
-    source_support_needs: list[SourceSupportNeed] = Field(default_factory=list)
-    support_needs: list[SupportNeed] = Field(default_factory=list)
+    # Preserve the public saved-run shape; new workflows use evidence and notes instead.
+    source_support_needs: SkipJsonSchema[list[SourceSupportNeed]] = Field(default_factory=list)
+    support_needs: SkipJsonSchema[list[SupportNeed]] = Field(default_factory=list)
     rails: list[Rail] = Field(default_factory=list)
     interfaces: list[Interface] = Field(default_factory=list)
     signal_checks: list[SignalCheck] = Field(default_factory=list)
@@ -387,11 +442,17 @@ class DesignRun(Record):
     usage: Usage = Field(default_factory=Usage)
     limits: Limits = Field(default_factory=Limits)
 
+    @field_validator("compatibility", mode="before")
+    @classmethod
+    def read_legacy_compatibility(cls, value):
+        # Historical incomplete records are not retroactively approved.
+        return None if value == "incomplete" else value
+
     def invalidate_review(self) -> None:
         """Any design change needs a fresh whole-BOM review."""
         self.review_completed = False
         self.findings = []
-        self.compatibility = "incomplete"
+        self.compatibility = None
 
 
 class Plan(Record):
@@ -430,32 +491,44 @@ class ReadingPlan(Record):
     document_requests: list[DocumentRequest] = Field(default_factory=list)
 
 
+class SourceApplicability(Record):
+    applies: bool
+    reason: str
+
+
 class EvidencePacket(Record):
-    applicability: dict[str, str] = Field(
-        description="One entry per applicable selected component ID, explaining the exact manufacturer/variant or general circuit guidance match. Omit a component when this source does not establish applicability; explain the gap in missing_facts."
+    applicability: dict[str, SourceApplicability] = Field(
+        description="For each selected component ID, state whether this source applies and explain the exact manufacturer/variant or general circuit guidance match. Use applies=false for a mismatched or unestablished source; its facts cannot establish that component's compatibility."
     )
     evidence: list[Evidence]
-    source_support_needs: list[SourceSupportNeed] = Field(
-        default_factory=list,
-        description=(
-            "Applicable required/recommended EXTERNAL support. Already-internal module circuitry is an "
-            "evidence fact, not an external obligation."
-        ),
-    )
     missing_facts: list[str] = Field(
         default_factory=list,
         description="Concrete needed facts not established by these pages, not hypothetical future concerns",
     )
 
 
-class CircuitProposal(Record):
+class OperatingConfiguration(Record):
     """Engineering update: models cannot write product identities or supplier offers."""
 
-    additional_components: list[ComponentSpec]
-    support_needs: list[SupportNeed]
+    additional_components: list[ComponentSpec] = Field(
+        description="Missing functional components such as power conversion or level translation, not ordinary supporting resistors/capacitors unless explicitly requested."
+    )
     rails: list[Rail]
-    interfaces: list[Interface]
-    signal_checks: list[SignalCheck] = Field(default_factory=list)
+    interfaces: list[Interface] = Field(
+        description=(
+            "Material communication between purchased components or explicitly requested external "
+            "connections. Built-in radio capability and ordinary off-board programming belong in "
+            "requirement evidence/configuration notes, not extra board interfaces."
+        )
+    )
+    signal_checks: list[SignalCheck] = Field(
+        default_factory=list,
+        description=(
+            "One assessment per necessary digital driving direction/electrical class, not per wire. "
+            "Do not invent active-driver thresholds for a dry-contact switch or an LED. Review their "
+            "contact/pull-up or current-limiting/rating compatibility using source/catalog evidence."
+        ),
+    )
     regulator_checks: list[RegulatorCheck] = Field(default_factory=list)
     assumptions: list[Assumption]
     configuration_notes: list[str]
@@ -483,7 +556,7 @@ class Correction(Record):
             "needed fact in configuration_instructions"
         ),
     )
-    configuration: CircuitProposal | None = Field(
+    configuration: OperatingConfiguration | None = Field(
         default=None,
         description=(
             "Complete replacement compatibility record using unchanged selected parts and current evidence; "

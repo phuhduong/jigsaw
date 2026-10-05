@@ -1,17 +1,33 @@
-# Project guidence
+# Project guidance
 
 ## Project
 
 Jigsaw is a small, free side project whose goal is to turn high-level, natural-language
 embedded-device requirements into an evidence-backed, compatibility-checked pre-layout
-bill of materials (BOM), including required supporting components and purchase links.
+BOM of functional components with purchase links and source-grounded configuration/support notes.
 
-Scope is BOM compatibility, not schematic or wiring design. Establish an evidence-backed
-feasible common operating configuration, necessary support parts with values and quantities,
-and material operating-range, current, logic-level, and interface/resource compatibility.
-Do not require numbered pin assignments, a netlist, or a complete programming-pad plan.
-Only evidence needed for a material BOM claim blocks the result; discarded unused facts
-remain visible guidance, not new proof obligations.
+Scope is functional-component compatibility, not schematic design or a complete PCB parts
+inventory. Establish a feasible common operating configuration and check material supply,
+current, logic-level, and interface/resource compatibility. Select missing functional blocks
+such as regulators, level translators, or drivers. Record ordinary decoupling, pull-ups,
+feedback networks, and reset/boot implementation as source-grounded notes for schematic work,
+not mandatory procurement or exhaustive value/count proof. Explicitly requested passives and
+the suitability of any actually selected part remain in scope. Do not require pin assignments,
+a netlist, or a complete programming-pad plan.
+Review is binary once completed. Fail only for identified functional or electrical
+compatibility errors, including missing selected parts or necessary functional blocks.
+Unknowns, coverage gaps, and evidence/reporting defects remain inspectable details, not
+blocking verdicts or warning banners. A pass means no explicit error was identified by
+the performed checks, not complete proof of compatibility. Without a completed review or
+an identified error, a run has no verdict.
+
+Normal frontend reporting should focus on the functional BOM, purchase links, component
+roles, important operating assumptions, schematic-stage notes, and actual functional or
+electrical failures. Successful review prose, raw numeric records, and source-binding errors
+are diagnostics, not proof of compatibility. Do not display unknown or unbound quantities
+as verified figures. Retain the complete saved JSON as a diagnostic export and the parts CSV.
+Show historical support inventories only when a legacy record contains them, not as empty
+sections on new runs.
 
 ## Engineering approach
 

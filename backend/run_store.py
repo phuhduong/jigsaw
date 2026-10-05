@@ -6,7 +6,6 @@ import csv
 import io
 import json
 import logging
-import math
 import os
 import re
 import tempfile
@@ -62,10 +61,10 @@ class RunStore:
                     run.compatibility = (
                         "issues_found"
                         if any(
-                            f.revision == run.revision and f.kind == "check" and f.status == "fail"
+                            f.revision == run.revision and f.blocks_review
                             for f in run.findings
                         )
-                        else "incomplete"
+                        else None
                     )
                     run.review_completed = False
                     run.terminal_reason = "The backend restarted before this run finished."
@@ -77,7 +76,10 @@ class RunStore:
 
 
 def _http_url(value: str | None) -> str | None:
-    parsed = urlparse(value or "")
+    try:
+        parsed = urlparse(value or "")
+    except ValueError:
+        return None
     return value if parsed.scheme in {"http", "https"} and parsed.netloc else None
 
 
@@ -88,7 +90,7 @@ def _is_custom_reel(offer) -> bool:
 def _order_quantity(required, moq, multiple):
     quantity = max(required, moq or 1)
     if multiple:
-        quantity = math.ceil(quantity / multiple) * multiple
+        quantity = (quantity + multiple - 1) // multiple * multiple
     return quantity
 
 
@@ -285,8 +287,6 @@ def design_context(run):
             "components",
             "evidence",
             "evidence_errors",
-            "source_support_needs",
-            "support_needs",
             "rails",
             "interfaces",
             "signal_checks",

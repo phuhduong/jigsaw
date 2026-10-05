@@ -169,6 +169,19 @@ class DocumentTests(unittest.TestCase):
         ):
             self.store.fetch(wrapper + quote("https://www.ti.com/lit/gpn/tlv757p", safe=""))
 
+    def test_double_encoded_ti_http_locator_is_fetched_over_https(self):
+        wrapper = (
+            "https://www.ti.com/general/docs/suppproductinfo.tsp?distId=10&gotoUrl="
+            "http%253A%252F%252Fwww.ti.com%252Flit%252Fgpn%252Ftps62161"
+        )
+        with (
+            patch("documents.socket.getaddrinfo", return_value=PUBLIC_DNS),
+            patch("documents.urllib3.HTTPSConnectionPool", return_value=Pool(Response(b"TI source"))),
+        ):
+            source = self.store.fetch(wrapper)
+        self.assertEqual(source["url"], "https://www.ti.com/lit/gpn/tps62161")
+        self.assertEqual(source["requested_url"], wrapper)
+
     def test_size_limit_and_unknown_evidence_fail_explicitly(self):
         self.store.max_bytes = 4
         with (

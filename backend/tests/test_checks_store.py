@@ -6,9 +6,8 @@ import json
 import tempfile
 import unittest
 
-from checks import refresh_checks as evaluate
-from checks import run_checks
-from fakes import example, supported_example
+from checks import refresh_checks, run_checks
+from fakes import example, legacy_support_example
 from models import (
     REVIEW_AREAS,
     Assumption,
@@ -20,9 +19,9 @@ from models import (
     PriceBreak,
     Quantity,
     Rail,
+    RegulatorCheck,
     Review,
     SignalCheck,
-    SupportNeed,
 )
 from run_store import (
     RunStore,
@@ -35,6 +34,46 @@ from run_store import (
 
 
 class CheckTests(unittest.TestCase):
+    def test_invalid_numeric_records_are_not_component_conflicts(self):
+        run = example()
+        run.rails[0].voltage_min.value = 4
+        run.rails[0].available_current.value = -1
+        refresh_checks(run)
+        self.assertEqual(run.compatibility, "checked")
+        findings = {finding.id: finding for finding in run.findings}
+        self.assertEqual(findings["code:voltage:supply:U1"].status, "unknown")
+        self.assertEqual(findings["code:current:supply"].status, "unknown")
+
+    def test_repair_findings_report_the_actual_acquisition_and_selection_failure(self):
+        run = example()
+        run.components[0].document_ids = []
+        run.components[0].document_errors = ["Document server returned HTTP 403"]
+        run.components[1].product = None
+        run.components[1].selection_error = "No compatible candidate for 1uF; candidate capacitance was 0.1uF"
+        findings = {finding.id: finding for finding in run_checks(run)}
+        self.assertIn("HTTP 403", findings["code:source:U1"].explanation)
+        self.assertIn("replace the part", findings["code:source:U1"].remedy)
+        self.assertIn("0.1uF", findings["code:selection:U2"].explanation)
+        self.assertIn("search_query", findings["code:selection:U2"].remedy)
+        self.assertEqual(findings["code:selection:U2"].status, "fail")
+        refresh_checks(run)
+        self.assertEqual(run.compatibility, "issues_found")
+
+    def test_only_current_explicit_functional_or_electrical_failures_block_review(self):
+        run = example()
+        power = next(f for f in run.findings if f.area == "power")
+        power.status = "unknown"
+        next(f for f in run.findings if f.area == "evidence").status = "fail"
+        refresh_checks(run)
+        self.assertEqual(run.compatibility, "checked")
+        power.status = "fail"
+        refresh_checks(run)
+        self.assertEqual(run.compatibility, "issues_found")
+        power.kind = "guidance"
+        run.findings.append(power.model_copy(update={"id": "stale", "kind": "check", "revision": 0}))
+        refresh_checks(run)
+        self.assertEqual(run.compatibility, "checked")
+
     def test_interface_can_use_its_current_source_backed_review_without_duplicate_refs(self):
         run = example()
         run.interfaces[0].evidence_ids = []
@@ -66,6 +105,105 @@ class CheckTests(unittest.TestCase):
         self.assertIn("U1 output_low_max", finding.explanation)
         self.assertIn("sensor_low belongs to U2", finding.explanation)
 
+    def test_legacy_manufacturer_guidance_cannot_bypass_numeric_checks(self):
+        run = example()
+        run.interfaces[0] = Interface.model_validate(
+            {**run.interfaces[0].model_dump(), "electrical_basis": "manufacturer_guidance"}
+        )
+        next(f for f in run.findings if f.area == "signals").subject_ids.append("bus")
+        run.signal_checks = run.signal_checks[:1]
+        finding = next(f for f in run_checks(run) if f.id == "code:interface_directions:bus")
+        self.assertEqual(finding.status, "unknown")
+        run.signal_checks[0].output_low_max.value = 1.2
+        refresh_checks(run)
+        failures = {f.id for f in run.findings if f.status == "fail"}
+        self.assertIn("code:signal:U1_to_U2", failures)
+        self.assertEqual(run.compatibility, "issues_found")
+
+    def test_one_component_capability_needs_its_current_source_backed_review(self):
+        for endpoint_count in (1, 2):
+            with self.subTest(endpoint_count=endpoint_count):
+                run = example()
+                run.interfaces.append(
+                    Interface(
+                        id="radio",
+                        protocol="Bluetooth",
+                        configuration="Built-in BLE capability",
+                        endpoints=[Endpoint(component_id="U1") for _ in range(endpoint_count)],
+                        evidence_ids=["spec"],
+                    )
+                )
+                finding = next(f for f in run_checks(run) if f.id == "code:interface:radio")
+                self.assertEqual(finding.status, "unknown")
+                next(f for f in run.findings if f.area == "signals").subject_ids.append("radio")
+                finding = next(f for f in run_checks(run) if f.id == "code:interface:radio")
+                self.assertEqual(finding.status, "pass")
+                self.assertIn("not an inter-part", finding.explanation)
+                run.interfaces[-1].protocol = "I2C"
+                finding = next(f for f in run_checks(run) if f.id == "code:interface:radio")
+                self.assertEqual(finding.status, "unknown")
+
+    def test_current_only_passive_load_keeps_current_and_explicit_voltage_checks(self):
+        run = example()
+        run.components[1].kind = "passive"
+        load = run.rails[0].loads[1]
+        load.voltage_min = load.voltage_max = None
+        review = next(f for f in run.findings if f.area == "power")
+        review.subject_ids.append("supply")
+        refresh_checks(run)
+        self.assertEqual(run.compatibility, "checked")
+        for problem in ("missing_review", "active_load", "missing_rail_bound"):
+            with self.subTest(problem=problem):
+                rejected = run.model_copy(deep=True)
+                if problem == "missing_review":
+                    rejected.findings = [f for f in rejected.findings if f.method != "model_review"]
+                elif problem == "active_load":
+                    rejected.components[1].kind = "active"
+                else:
+                    rejected.rails[0].voltage_min = None
+                finding = next(f for f in run_checks(rejected) if f.id == "code:voltage:supply:U2")
+                self.assertEqual(finding.status, "unknown")
+        load.current.value = 200
+        finding = next(f for f in run_checks(run) if f.id == "code:current:supply")
+        self.assertEqual(finding.status, "fail")
+        load.voltage_min = run.rails[0].loads[0].voltage_min.model_copy()
+        load.voltage_max = Quantity(value=3.0, unit="V", basis="max", evidence_ids=["spec"])
+        finding = next(f for f in run_checks(run) if f.id == "code:voltage:supply:U2")
+        self.assertEqual(finding.status, "fail")
+
+    def test_passive_load_drive_needs_review_and_preserves_supplied_limits(self):
+        run = example()
+        run.components[1].kind = "passive"
+        signal = run.signal_checks[0]
+        signal.input_high_min = signal.input_low_max = None
+
+        def signal_status(candidate):
+            return next(f.status for f in run_checks(candidate) if f.id == "code:signal:U1_to_U2")
+
+        self.assertEqual(signal_status(run), "pass")
+        for problem in ("missing_review", "stale_review", "invalid_driver", "active_receiver", "missing_load_source"):
+            with self.subTest(problem=problem):
+                rejected = run.model_copy(deep=True)
+                review = next(f for f in rejected.findings if f.area == "signals")
+                if problem == "missing_review":
+                    review.subject_ids = ["U1"]
+                elif problem == "stale_review":
+                    review.revision = 0
+                elif problem == "invalid_driver":
+                    rejected.signal_checks[0].output_low_max.evidence_ids = ["missing"]
+                elif problem == "active_receiver":
+                    rejected.components[1].kind = "active"
+                else:
+                    rejected.evidence[0].component_ids = ["U1"]
+                self.assertEqual(signal_status(rejected), "unknown")
+        run.evidence[0].component_ids = ["U1"]
+        run.components[1].product.parameters = [{"name": "Current - Test", "value": "20mA"}]
+        self.assertEqual(signal_status(run), "pass")
+        run.evidence[0].component_ids = ["U1", "U2"]
+        signal.input_high_min = Quantity(value=3.4, unit="V", basis="min", evidence_ids=["spec"])
+        signal.input_low_max = Quantity(value=0.9, unit="V", basis="max", evidence_ids=["spec"])
+        self.assertEqual(signal_status(run), "fail")
+
     def test_legacy_pin_data_is_readable_but_not_requested_or_reported(self):
         for model, data, field in (
             (PowerLoad, {"component_id": "U1", "pin": "VDD"}, "pin"),
@@ -82,18 +220,18 @@ class CheckTests(unittest.TestCase):
                 self.assertNotIn(field, record.model_dump())
                 self.assertNotIn(field, model.model_json_schema()["properties"])
 
-    def test_partial_review_is_retained_but_cannot_pass_missing_coverage(self):
+    def test_partial_review_passes_without_area_coverage_but_absent_review_has_no_verdict(self):
         for findings in ([], [f for f in example().findings if f.area != "support"]):
             with self.subTest(findings=len(findings)):
                 run = example()
                 run.findings = Review(findings=findings).findings
-                evaluate(run)
-                self.assertEqual(run.compatibility, "incomplete")
+                refresh_checks(run)
+                self.assertEqual(run.compatibility, "checked" if findings else None)
                 self.assertEqual([f for f in run.findings if f.method == "model_review"], findings)
                 self.assertTrue(any(f.id == "code:review_coverage" and f.status == "unknown" for f in run.findings))
 
-    def test_commodity_catalog_review_does_not_replace_active_or_support_evidence(self):
-        run = supported_example()
+    def test_commodity_catalog_review_does_not_replace_active_evidence(self):
+        run = legacy_support_example()
         capacitor = run.components[-1]
         capacitor.product.parameters = [{"name": "Capacitance", "value": "4.7 uF"}]
         self.assertFalse(any(f.id == "code:catalog_source:C1" for f in run_checks(run)))
@@ -109,13 +247,9 @@ class CheckTests(unittest.TestCase):
         )
         for kind in ("passive", "connector"):
             capacitor.kind = kind
-            evaluate(run)
+            refresh_checks(run)
             self.assertEqual(run.compatibility, "checked")
             self.assertTrue(any(f.id == "code:catalog_source:C1" and f.status == "pass" for f in run.findings))
-        run.support_needs = []
-        evaluate(run)
-        self.assertEqual(run.compatibility, "incomplete")
-        self.assertTrue(any(f.id == "code:source_support:D1S1" and f.status == "unknown" for f in run.findings))
         capacitor.kind = "active"
         self.assertTrue(any(f.id == "code:source:C1" and f.status == "unknown" for f in run_checks(run)))
 
@@ -144,82 +278,28 @@ class CheckTests(unittest.TestCase):
             finding = next(f for f in run_checks(run) if f.id == "code:signal:sda")
             self.assertEqual(finding.status, expected)
 
-    def test_source_required_support_cannot_be_omitted_or_downgraded(self):
-        run = supported_example()
-        evaluate(run)
-        self.assertEqual(run.compatibility, "checked")
-        for change in ("omit", "optional", "included", "not_applicable"):
-            with self.subTest(change=change):
-                run = supported_example()
-                if change == "omit":
-                    run.support_needs = []
-                elif change == "optional":
-                    run.support_needs[0].necessity = "optional"
-                else:
-                    run.support_needs[0].status = change
-                    run.support_needs[0].explanation = "Circuit claims no external component is needed"
-                evaluate(run)
-                self.assertEqual(run.compatibility, "incomplete")
-                self.assertTrue(any(f.id == "code:source_support:D1S1" and f.status == "unknown" for f in run.findings))
-        run = supported_example()
-        run.support_needs[0].component_ids = []
-        finding = next(f for f in run_checks(run) if f.id == "code:source_support:D1S1")
-        self.assertEqual(finding.status, "unknown")
-        self.assertIn(run.source_support_needs[0].purpose, finding.explanation)
-        self.assertIn("no purchased component IDs", finding.explanation)
-
-    def test_declining_recommended_support_requires_current_review(self):
-        run = supported_example()
-        run.source_support_needs[0].necessity = "recommended"
+    def test_legacy_support_records_remain_readable_without_new_completeness_checks(self):
+        run = legacy_support_example()
         run.components = run.components[:2]
         need = run.support_needs[0]
-        need.necessity, need.status, need.component_ids = "recommended", "not_applicable", []
-        need.explanation = (
-            "The documented external supply already provides the recommended local bypass at these test terminals."
-        )
-        evaluate(run)
-        self.assertEqual(run.compatibility, "incomplete")
-        run.findings.append(
-            Finding(
-                id="decline",
-                revision=run.revision,
-                area="support",
-                status="pass",
-                subject_ids=["D1S1"],
-                evidence_ids=["spec"],
-                explanation="Fixture review accepts the stated supply arrangement",
-            )
-        )
-        evaluate(run)
+        need.status, need.component_ids = "unresolved", []
+        run = DesignRun.model_validate(run.model_dump())
+        refresh_checks(run)
         self.assertEqual(run.compatibility, "checked")
-
-    def test_source_support_requires_current_owner_and_real_source_refs(self):
-        for change in ("uncited", "wrong_owner"):
-            with self.subTest(change=change):
-                run = supported_example()
-                if change == "uncited":
-                    run.source_support_needs[0].evidence_ids = ["missing"]
-                else:
-                    run.source_support_needs[0].parent_ids = ["removed_part"]
-                evaluate(run)
-                self.assertEqual(run.compatibility, "incomplete")
-                self.assertTrue(
-                    any(
-                        f.id == "code:source_support:D1S1" and f.status == "unknown" and f.area == "evidence"
-                        for f in run.findings
-                    )
-                )
+        self.assertEqual(run.support_needs[0].status, "unresolved")
+        self.assertTrue(run.source_support_needs)
+        self.assertFalse(any(f.method == "code" and f.area == "support" for f in run.findings))
 
     def test_bom_without_pin_mapping_passes_but_voltage_conflict_fails(self):
         run = example()
-        evaluate(run)
+        refresh_checks(run)
         self.assertEqual(run.compatibility, "checked")
         run.rails[0].loads[1].voltage_max.value = 3.0
-        evaluate(run)
+        refresh_checks(run)
         self.assertEqual(run.compatibility, "issues_found")
         self.assertTrue(any(f.status == "fail" and "voltage:" in f.id for f in run.findings))
 
-    def test_missing_or_absolute_limit_is_unknown_not_approved(self):
+    def test_missing_or_absolute_limit_stays_unknown_without_failing_review(self):
         for change in ("absolute", "uncited", "previous_variant"):
             with self.subTest(change=change):
                 run = example()
@@ -230,40 +310,30 @@ class CheckTests(unittest.TestCase):
                     operand.evidence_ids = []
                 else:
                     run.components[0].document_ids = ["replacement_document"]
-                evaluate(run)
-                self.assertEqual(run.compatibility, "incomplete")
+                refresh_checks(run)
+                self.assertEqual(run.compatibility, "checked")
+                self.assertTrue(any(f.id == "code:voltage:supply:U1" and f.status == "unknown" for f in run.findings))
 
-    def test_address_collision_and_required_support(self):
+    def test_address_collision_fails_until_addresses_are_distinct(self):
         run = example()
         run.interfaces[0].endpoints[1].address = "68"
-        evaluate(run)
+        refresh_checks(run)
         self.assertEqual(run.compatibility, "issues_found")
         run.interfaces[0].endpoints[1].address = "0x45"
-        run.support_needs = [
-            SupportNeed(
-                id="bypass",
-                purpose="Bypass",
-                parent_ids=["U1"],
-                necessity="required",
-                status="unresolved",
-                connections="VDD to GND",
-                evidence_ids=["spec"],
-            )
-        ]
-        evaluate(run)
-        self.assertEqual(run.compatibility, "incomplete")
+        refresh_checks(run)
+        self.assertEqual(run.compatibility, "checked")
 
     def test_empty_and_stale_reviews_cannot_pass(self):
         run = DesignRun(original_request="A device", review_completed=True, lifecycle="finished")
-        evaluate(run)
-        self.assertEqual(run.compatibility, "incomplete")
+        refresh_checks(run)
+        self.assertIsNone(run.compatibility)
         self.assertEqual(run.sourcing, "unknown")
         run = example()
         run.revision += 1
-        evaluate(run)
-        self.assertEqual(run.compatibility, "incomplete")
+        refresh_checks(run)
+        self.assertIsNone(run.compatibility)
 
-    def test_external_programmer_needs_explicit_assumption(self):
+    def test_external_programmer_assumption_gap_is_nonblocking(self):
         run = example()
         run.interfaces.append(
             Interface(
@@ -277,16 +347,46 @@ class CheckTests(unittest.TestCase):
                 ],
             )
         )
-        evaluate(run)
-        self.assertEqual(run.compatibility, "incomplete")
+        refresh_checks(run)
+        self.assertEqual(run.compatibility, "checked")
+        self.assertTrue(any(f.id == "code:interface:program" and f.status == "unknown" for f in run.findings))
         run.assumptions.append(
             Assumption(id="programmer", description="External 3.3 V USB/UART programmer attached to board pads")
         )
-        evaluate(run)
+        refresh_checks(run)
         self.assertEqual(run.compatibility, "checked")
 
 
 class StoreTests(unittest.TestCase):
+    def test_malformed_supplier_links_leave_a_usable_report_with_unknown_sourcing(self):
+        run = example()
+        for component in run.components:
+            component.product.product_url = "https://[invalid"
+            component.product.datasheet_url = "https://[invalid"
+            component.product.offers[0].url = "https://[invalid"
+        refresh_checks(run)
+        row = json.loads(export_json(run))["bom"][0]
+        self.assertEqual(run.compatibility, "checked")
+        self.assertEqual(run.sourcing, "unknown")
+        self.assertEqual(row["availability"], "unknown")
+        self.assertIsNone(row["purchase_url"])
+        self.assertIsNone(row["datasheet_url"])
+
+    def test_legacy_incomplete_is_unreviewed_in_store_and_exports_not_regraded(self):
+        legacy = example().model_dump()
+        legacy["compatibility"] = "incomplete"
+        run = DesignRun.model_validate(legacy)
+        with tempfile.TemporaryDirectory() as directory:
+            store = RunStore(directory)
+            store.save(run)
+            saved = store.load(run.id)
+        self.assertTrue(saved.review_completed)
+        self.assertIsNone(saved.compatibility)
+        exported = json.loads(export_json(saved))
+        self.assertIsNone(exported["compatibility"])
+        self.assertIsNone(exported["bom"][0]["review_status"])
+        self.assertEqual(next(csv.DictReader(io.StringIO(export_csv(saved))))["review_status"], "")
+
     def test_candidate_offer_context_rounds_purchase_quantity_and_exposes_packaging(self):
         run = example()
         run.components = run.components[:1]
@@ -369,7 +469,7 @@ class StoreTests(unittest.TestCase):
             offer.moq = 10
             offer.order_multiple = 4
             offer.price_breaks.append(PriceBreak(quantity=10, unit_price=1))
-        evaluate(run)
+        refresh_checks(run)
         row = bom_rows(run)[0]
         self.assertEqual(
             (row["installed_quantity"], row["required_quantity"], row["order_quantity"], row["extended_price"]),
@@ -384,7 +484,7 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(int(exported[0]["order_quantity"]), report["bom"][0]["order_quantity"])
         for component in run.components:
             component.product.offers[0].price_breaks = []
-        evaluate(run)
+        refresh_checks(run)
         self.assertIsNone(bom_rows(run)[0]["extended_price"])
         self.assertEqual(run.sourcing, "unknown")
 
@@ -397,20 +497,17 @@ class StoreTests(unittest.TestCase):
             self.assertEqual(store.load(run.id).original_request, "Two sensors")
             self.assertEqual(store.interrupt_unfinished(), 1)
             self.assertEqual(store.load(run.id).lifecycle, "interrupted")
+            self.assertIsNone(store.load(run.id).compatibility)
             with self.assertRaises(ValueError):
                 store.load("../outside")
 
 
 class ThermalCheckTests(unittest.TestCase):
-    def fixture(self):
-        from models import RegulatorCheck
-
+    def make_run(self):
         run = example()
         run.assumptions.append(Assumption(id="workload", description="100 mA sustained output with 400 mA short peaks"))
         run.assumptions.append(Assumption(id="thermal", description="70 degC ambient and 100 degC junction target"))
-        run.evidence[
-            0
-        ].fact = (
+        run.evidence[0].fact = (
             "Fixture regulator supplies 3.3 V at 300 mA; load peak is 400 mA; typical package theta_JA is 100 degC/W."
         )
 
@@ -452,7 +549,7 @@ class ThermalCheckTests(unittest.TestCase):
         return run
 
     def test_thermal_allowance_is_calculated_not_taken_from_model_scalar(self):
-        run = self.fixture()
+        run = self.make_run()
         regulator = run.regulator_checks[0]
         regulator.ambient_max.value, regulator.junction_target.value, regulator.theta_ja.value = 55, 125, 125
         run.rails[0].voltage_max.value = 5.4
@@ -464,7 +561,7 @@ class ThermalCheckTests(unittest.TestCase):
         self.assertNotIn("dissipation_limit", type(regulator).model_json_schema()["properties"])
 
     def test_thermal_operands_need_package_evidence_and_valid_headroom(self):
-        run = self.fixture()
+        run = self.make_run()
         regulator = run.regulator_checks[0]
         regulator.dissipation_limit = Quantity(value=10, unit="W", basis="estimate", assumption_id="thermal")
         regulator.theta_ja.evidence_ids, regulator.theta_ja.assumption_id = [], "thermal"
@@ -474,14 +571,14 @@ class ThermalCheckTests(unittest.TestCase):
 
         self.assertEqual(thermal_status(), "unknown")
         regulator.theta_ja.evidence_ids, regulator.theta_ja.value = ["spec"], 0
-        self.assertEqual(thermal_status(), "fail")
+        self.assertEqual(thermal_status(), "unknown")
         regulator.theta_ja = None
         self.assertEqual(thermal_status(), "unknown")
         regulator.ambient_max = regulator.junction_target = None
         self.assertEqual(thermal_status(), "unknown")
 
     def test_average_thermal_load_does_not_reduce_peak_capacity_check(self):
-        run = self.fixture()
+        run = self.make_run()
         findings = {f.id: f for f in run_checks(run)}
         self.assertEqual(findings["code:dissipation:U1"].status, "fail")
         self.assertIn("peak load", findings["code:dissipation:U1"].explanation)
@@ -495,19 +592,19 @@ class ThermalCheckTests(unittest.TestCase):
 
     def test_average_thermal_load_needs_valid_basis_and_peak_bounds(self):
         for value, unit, assumption, expected in (
-            (-0.1, "A", "workload", "fail"),
-            (0.5, "A", "workload", "fail"),
+            (-0.1, "A", "workload", "unknown"),
+            (0.5, "A", "workload", "unknown"),
             (0.1, "A", None, "unknown"),
             (0.1, "W", "workload", "unknown"),
         ):
             with self.subTest(value=value, unit=unit, assumption=assumption):
-                run = self.fixture()
+                run = self.make_run()
                 run.regulator_checks[0].average_output_current = Quantity(
                     value=value, unit=unit, basis="estimate", assumption_id=assumption
                 )
                 finding = next(f for f in run_checks(run) if f.id == "code:dissipation:U1")
                 self.assertEqual(finding.status, expected)
-        run = self.fixture()
+        run = self.make_run()
         run.evidence.append(run.evidence[0].model_copy(update={"id": "reg_only", "component_ids": ["U1"]}))
         run.regulator_checks[0].average_output_current = Quantity(
             value=0.1, unit="A", basis="typical", evidence_ids=["reg_only"]

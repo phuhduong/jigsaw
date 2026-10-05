@@ -1,11 +1,857 @@
-# Live verification progress
+# Live verification results
 
-Recorded 2026-09-13–14 UTC from the named local run JSON snapshots and focused-test
-execution notes. The latest milestone is the completed cleanup verification below,
-including accepted conditional BOM `29c85ccd`; the earlier accepted baseline is `149dc533`.
+Recorded 2026-09-13–14, 2026-09-30, and 2026-10-05 UTC from named local run JSON snapshots,
+event streams and focused-test execution notes. The current cleanup verification uses the
+user-approved binary review policy. Earlier frozen and practical evaluations below retain
+their original criteria and outcomes, without retrospective relabeling.
+Earlier accepted conditional BOMs include `29c85ccd` and `149dc533`.
 Older sections preserve unsuccessful and guided trials as historical diagnostics, not
 current blockers or successful unattended examples. No general reliability, current stock,
 provider-quota or hardware-qualification claim follows from these records.
+
+Raw snapshots, event streams, document caches, and evaluation artifacts under
+`backend/data/` stay local and are excluded from source control. Saved-run IDs and
+localhost links refer to those local records; this repository publishes the audit summaries.
+
+## Preset generalization (2026-10-04 local / 2026-10-05 UTC, unchanged prompt 41)
+
+The [declared eight-run batch and independent audits](preset-generalization-2026-10-04.md)
+completed on unchanged backend code, model, and limits: one wireless control, two exact
+battery-logger requests, two exact light/display requests, and three new requests.
+The backend passed six and failed two. Independent source inspection found three plausible
+sets without an identified compatibility error, two correctly rejected unsuitable results,
+and **three false acceptances** (wireless control, first battery attempt, first display attempt).
+Failures involved inadequate power capability, an incompatible battery holder, or stale
+supply/interface configuration after part replacement. Unknowns and missing ordinary passive
+procurement were not treated as functional failures. The two extra frontend presets remain removed.
+
+All saved/streamed/GET/JSON/CSV comparisons passed; no run stopped on quota or budget.
+Usage was 115 model calls, 956,598 input tokens, 114,238 output tokens, and 661.87 seconds.
+No output was manually repaired, no historical verdict was rewritten, and no tuning cycle
+followed. These counts describe this small fixed batch, not general reliability.
+
+## Reporting handoff audit (2026-09-30, unchanged prompt 41)
+
+The follow-up pass audited all backend modules after clarifying that verbose success narratives
+and unsupported electrical figures do not belong in the normal product report. **No further
+runtime deletion or rewrite was justified.** The backend source hashes are identical to the
+preceding functional-component cleanup. There was no prompt, model, schema, budget or dependency change.
+
+Passing model findings still support catalog, passive-load and interface evidence checks and
+completed-review detection. Failure explanations and remedies guide source reading and correction.
+`design_context` already excludes successful findings and selection rationale from subsequent
+model calls. Removing these records from saved state would change useful behavior or diagnostics,
+not merely remove UI noise. Numeric source bindings, evidence references and binding errors
+likewise retain distinct purposes.
+
+The changes in this pass are documentation and verification. AGENTS, backend README and current
+architecture now distinguish normal UI content from diagnostic records, retain full JSON and
+parts CSV exports, and specify that empty historical support sections should not appear on new
+runs. The root README identifies this as pending frontend alignment, not completed UI work.
+In particular, current frontend quantity/rail formatters display values without inspecting
+`binding_error`; backend numerical checks already reject those unresolved operands. Fixing
+that presentation requires frontend work, not a new backend reporting layer.
+
+Independent read-only reviews found no additional justified backend cut. Verification again
+passed **106 backend tests**, **21 frontend tests**, frontend typecheck/build, **3 MCP tests plus
+build**, compatibility of 55 Python packages, and `git diff --check`. The existing nonblocking
+Browserslist data-age warning remains. No frontend source files were edited in this pass.
+
+### Every fresh attempt
+
+One fresh unattended run used the original sensor request without hints or manual repair:
+
+> Make me a temperature and humidity sensor with WiFi and Bluetooth powered by USB-C for consumer use.
+
+| Run | Verdict / sourcing | Placements / rows | Calls | Input / output tokens | Duration | Corrections |
+|---|---|---|---:|---:|---:|---:|
+| `efb7a3217200441d93a1921248458879` | checked / available | 6 / 5 | 9 | 75,755 / 11,532 | 49.86 s | 0 |
+
+All six placements were selected and all five grouped rows have purchase links and sufficient
+recorded stock. They are the same four functional parts as the preceding run, plus two Panasonic
+ERJ-3EKF5101V 5.1 kΩ resistors. Those CC resistors are electrically plausible, but their procurement
+is a model scope-adherence deviation from the instruction to leave ordinary support as notes.
+The backend did not restore support-completeness requirements or fulfillment records.
+
+The run consumed ten supplier calls, five document acquisition attempts and ten PDF page inputs.
+It finished without model/provider errors, with zero blocking failures and eleven nonblocking
+failed/unknown check details. The regulator and connector source access limitations remain.
+The 36 stream events, saved GET, JSON export, and CSV identities/quantities/links/verdicts agree.
+Legacy support arrays are empty and frozen runtime hashes match. The isolated port-3002 server
+did not alter existing application/MCP processes.
+
+Artifacts are in `backend/data/evaluations/reporting-cleanup-20260930-v41/`: the original saved
+run, `sensor-events.jsonl`, `report.json`, `bom.csv`, `manifest.json`, and `verification.json`.
+This is a repeat smoke test of unchanged software, not evidence that this pass improved model
+accuracy. The result was not manually repaired or replaced with a more favorable retry.
+
+### Independent output audit
+
+Visual source inspection again found a plausible functional-component set with no obvious
+inherent inter-part voltage/logic conflict or missing functional block. The selected 5.1 kΩ,
+±1%, 0.1 W CC resistors fit that supporting role, although their inclusion was outside the
+notes-only generation instruction. Their presence is not evidence that the backend reinstated
+a completeness gate.
+
+The **model's thermal pass is wrong**, not merely missing a citation. It claims roughly
+82 °C junction at 40 °C ambient using 65 °C/W and a 150 °C maximum. The exact Slkor source
+specifies 135 °C/W for SOT-223 and 125 °C operating junction maximum; 150 °C is thermal
+shutdown, not an operating approval. With the recorded 379.5 mA peak load treated as sustained
+and up to 10 mA regulator own current, nominal 5 V/3.3 V produces about 134 °C. At the recorded
+5.25 V input and source 3.234 V output corner, the screen is about 150 °C. Both exceed the
+record's 120 °C target. The model also reuses the catalog's blanket 1 A capacity, whereas the
+source recommends a 600 mA SOT-223 DC maximum.
+
+This does not establish that the regulator must be replaced for an ordinary sensor. This run
+actually extracted Espressif's 239 mA active TX average as `D1E4N2`, distinct from 379 mA peak.
+Using that average plus 0.5 mA sensor and 10 mA regulator own current gives about 0.535 W and
+112 °C at 40 °C ambient with 135 °C/W. That is a plausible operating case, but the saved
+configuration left `average_output_current` null and did not adopt it. The independent audit
+must not silently repair the record or endorse the original thermal pass. The report also
+contains wrong-owner/missing I2C operands despite physically compatible source thresholds.
+
+Audit sources were the cached ESP32 pages 28–29, SHT4x page 9 and exact Slkor pages 2–3 retained
+with the preceding evaluation. The PDF skill's visual table review was used. Backend numerical
+checks left the unsupported thermal operands unknown; the model supplied the misleading pass
+prose. This reinforces the documented separation of user-facing output from diagnostic claims,
+but hiding that prose does not itself improve engineering accuracy. No follow-on prompt,
+special-case, model or architectural tuning cycle was started.
+
+## Functional-component cleanup (2026-09-30, prompt 41)
+
+This pass implements the clarified product boundary: a BOM of functional components plus
+source-grounded support/configuration notes, not a complete PCB supporting-parts inventory.
+The earlier support-count audits below remain historical assessments under their original scope.
+
+### Cleanup and verification
+
+- Removed new-run support-requirement/fulfillment schemas, same-ID matching, omitted-obligation
+  reinsertion, support-completeness checks, and forced peripheral-schematic page selection.
+  Source evidence and configuration notes retain material supporting-circuit dependencies.
+- Retained operating configuration, source-owned numerical binding, voltage/current/logic,
+  interface/resource and regulator checks, selected-part correctness, and bounded addition and
+  source reading of missing functional blocks. Explicitly requested passives remain supported.
+- Renamed the circuit proposal/configuration path to `OperatingConfiguration`, `_configure_bom`
+  and `_source_and_configure`. Removed obsolete tests and made legacy-only fixtures explicit.
+- Historical support arrays remain serialized and readable. New execution clears those arrays;
+  model context excludes them, and retrieval/export never regrades historical saved results.
+- Aligned AGENTS, both READMEs, current architecture and all model stages. Kept the same free
+  Flash-Lite model, binary review policy, execution limits, dependencies, services and API.
+- Independent code/doc reviews found no blocking regression or additional justified boundary
+  refactor. Backend runtime is 4,400 lines across the same 11 modules, down 189 lines from the
+  immediately preceding cleanup state. This count includes schemas, prompts and comments.
+
+Verification passed: **106 backend tests**, **21 frontend tests**, frontend typecheck and
+production build, **3 MCP tests plus build**, dependency compatibility for 55 installed Python
+packages, and `git diff --check`. Tests remain deterministic and local. The frontend build
+reported a stale Browserslist database warning, not a build failure; dependencies were unchanged.
+
+### Every fresh attempt
+
+One unattended run used the unchanged original request, without component hints or manual repair:
+
+> Make me a temperature and humidity sensor with WiFi and Bluetooth powered by USB-C for consumer use.
+
+| Run | Verdict / sourcing | Placements / rows | Calls | Input / output tokens | Duration | Corrections |
+|---|---|---|---:|---:|---:|---:|
+| `d4b525bee91246a4aeb3086f015174c8` | checked / available | 4 / 4 | 8 | 63,952 / 10,135 | 41.99 s | 0 |
+
+The BOM contains ESP32-WROOM-32E-N4, SHT40-AD1B-R2, Amphenol 10155435-00011LF and
+Slkor AMS1117-3.3 SOT-223. All four rows have purchase links and adequate recorded stock.
+Routine support is configuration guidance, not purchased placements or fulfillment records.
+The run consumed eight supplier calls, five document acquisition attempts and twelve PDF page
+inputs. There were no provider/quota errors. The regulator's source and connector's PDF returned
+403; the connector also had catalog specifications and the general manufacturer USB-C guide.
+
+The 31 SSE events have consistent run IDs and contiguous sequences. Terminal snapshot, saved
+GET, JSON export, and CSV identities/quantities/links/verdicts agree. Both legacy support arrays
+are empty. Runtime hashes match the manifest frozen before the run. Verification used an isolated
+server on port 3002 without changing the existing backend or MCP processes.
+
+Artifacts are retained under `backend/data/evaluations/scope-cleanup-20260930-v41/`, including
+the original saved run, `sensor-events.jsonl`, `report.json`, `bom.csv`, `manifest.json` and
+`verification.json`. No result was manually repaired or hidden by retrying the request.
+
+The passing badge is not evidence that every calculation passed. Ten current code checks
+remain unknown: missing regulator source/operating data, incorrect multiple-reference MCU
+voltage bindings, an omitted I2C return-direction record and unresolved signal/thermal operands.
+The model's broad power/interface approvals exceed what those recorded checks establish.
+These are retained review limitations under the existing binary policy, not silently converted
+into individually verified checks. Independent practical inspection is recorded below.
+
+### Independent practical output audit
+
+A separate reviewer and the main agent inspected original manufacturer tables visually, using
+the PDF skill. No obvious inherently incompatible functional-part choice was identified for an
+ordinary indoor sensor. The ESP32's radio/controller functions and SHT40's temperature/humidity
+function fit the request. At a common 3.3 V, the documented input ranges and bidirectional I2C
+levels are compatible with suitable ordinary pull-ups and bus loading. This independently
+established plausibility does not repair the backend's missing/bad numeric references.
+
+The exact regulator deserves a specific qualification. The independent reviewer located the
+Slkor [part page](https://www.slkoric.com/productDetail/12254697) and its linked
+[AMS1117 Rev.2 datasheet](https://www.slkoric.com/upload/file/1788315374_5857.pdf), which the
+backend did not acquire. Physical pages 2–3 give **135 °C/W** junction-to-ambient thermal
+resistance for SOT-223, **600 mA** recommended DC output current and **750 mW** maximum
+dissipation. The report instead assumes 65 °C/W and broadly approves a 1 A capacity from
+catalog data. Those are not trustworthy operating assurances. The source also gives 3.234–3.366 V
+under its stated output test conditions and up to 10 mA own current, rather than the report's
+3.23–3.3 V window and 2 mA own-current value. Its headroom and minimum-load conditions also
+need consideration during schematic design; catalog labels are not a substitute for that source.
+
+This does not demonstrate that the regulator is unusable for the requested sensor. Treating
+the full recorded 500.5 mA downstream reservation as continuous load at 5.25 V would dissipate
+about 1.06 W including 10 mA own current and exceed this package's stated thermal envelope.
+But Espressif physical page 29 distinguishes actual radio draw from its 500 mA supply-capability
+recommendation: the listed highest Wi-Fi TX mode has 379 mA peak and 239 mA average at its test
+conditions. An **independent feasibility screen**, using that 239 mA average plus 0.5 mA sensor
+load, 10 mA regulator own current, 5.25 V input, 3.234 V output and the recorded 25 °C ambient,
+gives about 0.535 W and 97 °C junction using 135 °C/W. That is a plausible ordinary operating
+case, not a workload established by the saved backend report or a guaranteed board result.
+Likewise, the report's 500 mA upstream assumption does not cover its own downstream reservation
+plus regulator consumption, although that reservation is not demonstrated actual continuous draw.
+
+The audit used cached ESP32-WROOM-32E/32UE physical pages 28–29 and SHT4x page 9, plus the
+independently retrieved Slkor pages 2–3. The latter is retained as
+`slkor-ams1117-audit-source.pdf` alongside the evaluation artifacts. Ordinary capacitor counts,
+reset wiring, and a complete support-parts shopping list were not acceptance criteria.
+
+**Conclusion:** the cleanup preserves a functioning natural-language-to-functional-BOM path and
+the selected parts are reasonable for the stated project scope. The model's electrical report
+still overstates what it established. This single attempt does not prove consistent correctness,
+and the independent findings must not be described as checks the backend itself completed.
+No further prompt additions, special cases, model changes, or automatic tuning cycle followed.
+
+## Backend cleanup (2026-09-30, prompt 40)
+
+The cleanup preserves the explicit Python workflow, Flash-Lite, resource limits and public
+saved-run contract. Completed reviews have two outcomes. Unknown evidence/calculation details
+are not failures, and no completed review is represented by a null verdict.
+
+### Code review and verification
+
+- Consolidated numerical unit conversion, named binding/read/parse/build helpers consistently,
+  simplified retry and terminal-state handling, and removed unused source-fetch bookkeeping.
+- Removed blanket evidence-gap-triggered correction rereads. Part changes, explicit source
+  reread requests and newly introduced active support still acquire/read their sources.
+- Removed rejection solely for a missing datasheet locator. Catalog identity confirmation and
+  source discovery/applicability review remain; an absent source is not a component mismatch.
+- Fixed malformed supplier links crashing report projection and aligned unsupported saved-base
+  refinement with retrieval/export's 404 behavior. Purchase multiples use exact integer rounding.
+- Retained all six checking domains, source-number binding, acquisition protections, bounded
+  retries, atomic persistence and legacy readers because each has demonstrated product value.
+  No new dependency, service, orchestration layer, model or acceptance gate was introduced.
+- Independent cross-reviews covered the workflow, numeric checks, integration boundaries,
+  API, persistence and exports. They found no blocking cleanup regressions.
+
+Verification passed: **109 backend tests**, **21 frontend tests**, frontend typecheck and
+production build, and **3 MCP tests plus build**. Unit tests use local fakes without live
+models, networks or timing injection. `git diff --check` passed. `uv pip check` verified all
+55 installed packages after the existing environment proved to have no pip module;
+no package installation or dependency change was made.
+
+### Fresh end-to-end attempt
+
+One unattended attempt used the original request, without component hints or manual repair:
+
+> Make me a temperature and humidity sensor with WiFi and Bluetooth powered by USB-C for consumer use.
+
+| Run | Backend verdict / sourcing | Placements / BOM rows | Model calls | Input / output tokens | Duration | Corrections |
+|---|---|---|---:|---:|---:|---:|
+| `036695dc824148e1b64e7bdb714635aa` | checked / partial | 13 selected / 11 rows | 14 | 175,416 / 21,648 | 95.61 s | 0 |
+
+All 11 purchasing rows have purchase links; 10 have sufficient stock in the recorded offers.
+The TLV75733PDBVR regulator had zero stock. The completed review contains zero blocking failures
+and seven nonblocking failed/unknown details. No provider error or quota stop occurred.
+The server was isolated on port 3002; the existing application and MCP processes were untouched.
+
+SSE sequences, terminal snapshot, saved GET, JSON export, CSV identities/quantities/links and
+verdicts were checked for agreement. Runtime hashes matched the frozen pre-run manifest.
+Artifacts are retained under `backend/data/evaluations/cleanup-20260930-v40/`, including the
+unchanged saved run, event stream, `report.json`, `bom.csv`, `manifest.json` and `verification.json`.
+
+### Independent practical output audit
+
+The main ESP32-WROOM-32E-N4, SHT40-AD1B-R2 and TLV75733PDBVR choices are plausible for the
+requested functions and a 3.3 V sensor board. The two 3.9 kΩ I2C pullups and two 5.1 kΩ
+USB-C pull-downs are present. This is not schematic or exhaustive layout qualification.
+
+**One concrete support-part omission remains.** C1 is the single 22 µF capacitor, but the
+model claims it satisfies both the regulator's 5 V input and its 3.3 V output/module bulk
+requirement. Those are distinct rails. The TLV757P datasheet's pin/application material on
+physical pages 3–4 requires separate input and output capacitance. The other capacitors are
+0.1 µF bypass parts and a 1 µF part already allocated to the module's EN delay. The ordinary
+repair is a separate suitable input capacitor, nominally at least 1 µF and retaining the
+datasheet's required effective capacitance above 0.47 µF under operating conditions.
+No such repair was manually applied to the saved BOM.
+
+The thermal report also uses the evaluation-board figure of 100.8 °C/W rather than the
+ordinary JEDEC figure of 231.1 °C/W. At its recorded 150 mA average, 40 °C ambient and worst
+recorded supply drop, the latter gives approximately 109 °C. That is below the device's
+125 °C limit but above the report's chosen 100 °C target. This is a conditioning/report
+limitation, not proof that the selected regulator cannot serve an ordinary duty-cycled sensor.
+
+Source audit used the cached original manufacturer PDFs, including TLV757P document
+`doc_84930bb4785ab3ddf29a6d1731a50c9bd37abeb9cbb91db86d476a9ff54033f0`, with relevant tables
+and circuit pages visually inspected. The pipeline's passing verdict and this independent
+finding are recorded separately. The cleanup confirms functioning generation and report
+delivery, not that the model detects every obvious component/support error. No further
+prompt-tuning, special-case checking, or architectural cycle was started.
+
+## Frozen reliability acceptance (2026-09-30, prompt 37)
+
+**Failed.** The [predeclared gate](reliability-plan.md) required at least 9 of 10 fresh runs
+to finish checked with required placements and purchase links, and zero material false
+positives under independent original-source audit. All ten attempts were made. One was
+`checked`, seven were `incomplete`, and two were `issues_found`. The only checked result
+failed that audit, leaving **0 of 10 results satisfying the combined acceptance gate**.
+This is not a universal success-rate estimate or proof that none of the other selections
+could work. Incomplete evidence is not itself electrical incompatibility.
+
+### Method and every attempt
+
+The five exact requests in the plan were run twice consecutively through real HTTP on
+unchanged final runtime code, with no per-request hints, manually repaired results, or
+acceptance-only settings. Gemini `gemini-3.5-flash-lite`, `google_genai`, provider-default
+thinking, prompt 37 and numeric binding version 1 were fixed throughout. Normal limits
+were 480 seconds, 30 model calls, 400,000 input tokens, 64,000 output tokens, 60 supplier
+calls, 20 document acquisitions, 120 PDF page inputs, 40 placements and two corrections.
+The normal source-file cache was used; no completed design was preloaded.
+
+Every lifecycle below is `finished`. That means bounded execution ended, not that the
+BOM passed. Tokens are recorded input/output usage; calls include model attempts, while
+corrections count applied corrections, not every proposed or rejected correction.
+
+| Attempt / request / run ID | Compatibility / sourcing | Input / output tokens | Calls / corrections | Seconds |
+|---|---|---:|---:|---:|
+| 1 / sensor-a / `ac6a1189f74b4ed393b06cac8ec6e149` | checked / available | 350,452 / 33,682 | 19 / 2 | 154.46 |
+| 2 / sensor-b / `bd56358bed51476d8dc6fc28123808bc` | incomplete / available | 314,703 / 33,642 | 19 / 2 | 139.46 |
+| 3 / pressure-a / `ed2ba8704d1a4b61a997336f0deda2b6` | incomplete / available | 104,681 / 9,058 | 12 / 0 | 53.22 |
+| 4 / pressure-b / `45b0110842d546509b29449429bee475` | incomplete / available | 374,322 / 29,301 | 23 / 2 | 159.02 |
+| 5 / button-a / `f2b272ead58641aca3a77b4b238d07f2` | incomplete / available | 307,533 / 24,941 | 24 / 2 | 135.11 |
+| 6 / button-b / `ad041b0021f240f8a15f95d24a84d67c` | incomplete / available | 339,881 / 32,299 | 22 / 2 | 160.84 |
+| 7 / light-a / `0466473f592e41e18f61510534c46e71` | incomplete / partial | 245,445 / 29,862 | 15 / 1 | 121.51 |
+| 8 / light-b / `029c8ec7addd49e3a2715d3d5274955d` | issues_found / partial | 371,303 / 24,423 | 23 / 2 | 148.18 |
+| 9 / logger-a / `78b6a2b271ff4e6580bb928d4f05c75c` | incomplete / available | 253,293 / 32,093 | 15 / 1 | 158.25 |
+| 10 / logger-b / `7969892eb5674a89aa60eed17275f6d5` | issues_found / partial | 380,135 / 30,245 | 25 / 2 | 153.67 |
+
+Totals were **3,041,748 input tokens, 279,546 output tokens, 197 model calls and 1,383.72
+seconds of run duration**. Seven runs had available sourcing and three partial sourcing.
+Attempts 1–9 selected every placement. Attempt 10 left its controller unselected; its nine
+exported purchasing rows do not constitute a complete BOM. Every exported row had a purchase
+link. Sourcing availability is a dated observation, separate from compatibility.
+
+There were no provider-quota failures or model-timeout terminal failures in this batch.
+Local RPM scheduling waits did occur. One attempt exhausted the document allowance and
+another could not reserve enough input tokens for its next review; neither is a Gemini
+rate-limit response. All attempts remained within the configured execution bounds.
+
+### Independent audit of the only checked result
+
+Attempt 1 was audited read-only by a separate Codex reviewer, independent of the backend's
+production review call. The main agent also inspected the original AP2114 PDF pages visually
+and independently recomputed the decisive thermal comparison. Neither audit changed the
+saved record, introduced a new operating assumption, or required pins, nets or a schematic.
+This is a source-based software evaluation, not hardware testing or professional certification.
+
+The 15 placements / 11 purchasing rows contain the selected ESP32-WROOM-32E-N4, SHT40-AD1B-R2,
+AP2114H-3.3TRG1 regulator and ATTEND 217B-CA05 USB-C connector, with the expected regulator
+capacitors, controller enable/decoupling support, sensor decoupling, two I2C pullups and two
+USB-C CC resistors. Exact catalog identities, purchase links, support values/counts, radio
+functions and heater-off sensor/interface operation were substantially coherent.
+
+**The claimed thermal pass is unsupported and material.** The saved source number used as
+`theta_ja` is 50.9°C/W, but its own condition says junction-to-case. The
+[AP2114 manufacturer datasheet](https://www.diodes.com/assets/Datasheets/AP2114.pdf), original
+PDF page 12, identifies that number as **θJC**, not **θJA**. Page 7 lists **128°C/W θJA for
+SOT-223 without a heatsink**; page 5 identifies the H variant as SOT-223. The cached original is
+`backend/data/documents/doc_d20cd46c5f472fe220f3e1ffb82b2679bc37e3dd145891bfdedf0acb78089d51.pdf`.
+
+The run records 50°C ambient, a 115°C junction target, no average-load restriction, and
+0.759188 W calculated loss. The wrong parameter gives a 1.27701 W allowance and a code pass.
+Using the documented junction-to-ambient parameter gives only `(115 - 50) / 128 = 0.5078125 W`.
+The corresponding screening junction estimate is approximately 147.18°C, above the run's
+own target. An earlier correct θJA observation was discarded for a quotation mismatch;
+the incorrectly classified θJC replacement survived. Numeric binding faithfully reused the
+wrong interpretation, and the model reviewer approved it using nominal-only arithmetic.
+
+This does **not** establish that these parts necessarily overheat under every plausible use.
+A different justified sustained-load condition might make the selection feasible. The saved
+run did not establish that condition, so inventing it after the fact would repair the result
+rather than audit it. The batch fails on unsupported material assurance even if these same
+components could work in another configuration.
+
+Other record defects include output bounds omitting applicable load/line effects, a small
+output-bound arithmetic error, an inaccurate absolute-maximum-temperature note and package/
+I2C-mode wording mistakes. None is needed to establish the decisive rejection. The optional
+sensor heater was not required for ordinary temperature/humidity measurement.
+
+### Failure patterns, without repairing the attempts
+
+- **Attempt 2 — incomplete numeric/interface record.** Both corrections completed, but the
+  controller-to-sensor I2C direction remained absent and the final thresholds referenced
+  nonexistent `D1E2T1`. Valid threshold source numbers were available after a reread. This
+  was not token, timeout or source-access exhaustion; physical incompatibility was not established.
+- **Attempt 3 — acquisition limitation and unmet form factor.** The TI distributor wrapper
+  contained a double-encoded HTTP destination. The local redirect normalizer rejected it
+  before fetching, so this is not evidence of a TI outage. The model also selected a
+  DFR0654 FireBeetle development/evaluation board despite the explicit no-development-board
+  requirement. Missing operating/interface records remained, and correction gave up with
+  no applied repair and substantial budget remaining.
+- **Attempt 4 — ineffective source/part replacement.** The NXP sensor PDF returned 404.
+  Both corrections intended a Bosch replacement, but broad supplier fallback reselected
+  MPL3115A2ST1 while retaining an inapplicable Bosch source. Regulator facts and bidirectional
+  interface evidence remained incomplete, including thresholds owned by the wrong device.
+  Both corrections were consumed; the input budget was not exhausted.
+- **Attempt 5 — repeated acquisition failures exhaust 20 downloads.** There were two
+  successful acquisitions and 18 failed attempts: Amphenol 403 seven times, ON Semiconductor
+  403 seven times and Microchip 403 four times. Repeated MIC5319 replacement queries returned
+  the same NCP114 through fallback. Replacement clears the prior component's error history
+  before selection, so it is inaccurate to say that selection knowingly ignored a failure
+  still present in its context. Unsuccessful URLs are retried rather than cached as failures.
+  Recovery/history loss and model repetition jointly consumed the bounded allowance.
+- **Attempt 6 — passive LED modeled as an active IC.** The indicator retained `active` kind
+  through replacements, creating inappropriate IC supply/logic obligations. Corrections
+  chased LED documents rather than fixing the classification, invented active-style limits,
+  and cited a controller radio-current fact for the LED. An empty indoor-use mapping and
+  missing support review also remained. The existing passive path was not exercised; merely
+  changing the classification would not independently validate the rest of this result.
+- **Attempt 7 — a real divider error plus representation gaps.** TLV62569 output depends on
+  `VFB * (1 + R1/R2)`, but the binder cannot derive resistor-programmed output envelopes.
+  It treated the minimum adjustable output range as the delivered rail. Separately, the
+  selected 100 kΩ/24.3 kΩ ±1% divider is genuinely wrong for the claimed 3.3 V rail: nominal
+  output is 3.06914 V, and the documented 0.588–0.612 V feedback range with resistor corners
+  gives 2.95984–3.18140 V, crossing the ESP32's 3.0 V minimum. These calculations use original
+  TLV62569 pages 4 and 9, cached as
+  `doc_1ba6f55dfe678d06d563acd6632f1f950a497d812270806021097b55cd81d3c4.pdf`.
+  OPT3001 calls its active-mode 3.7 µA typical consumption "quiescent current"; extraction
+  preserved that condition, but the binder does not accept that role as device load current.
+  This particular block is a contract mismatch, not confusion with shutdown consumption.
+  Additional invalid/wrong-owner references remained. The second correction repeated the
+  same configuration and hit the no-progress stop after one applied correction.
+- **Attempt 8 — unsuccessful recovery and an input reservation stop.** The intended
+  VEML7030 replacements repeatedly fell back to the undocumented LTR-329ALS selection while
+  the retained Vishay URL returned 404. The final review was not sent: 371,303 used plus
+  37,210 estimated input tokens exceeds 400,000. The recorded 0.588–0.612 V failure binds
+  the regulator's feedback reference as its output, not a verified physical output rail.
+  Unsupported divider derivation, wrong-owner current references and missing reverse I2C
+  evidence also persist. A larger cap alone has no demonstrated repair benefit here.
+- **Attempt 9 — extraction omitted numeric records.** The AP2112 source was acquired, but
+  all 13 extracted evidence items had empty `numbers` lists. Assembly and corrections used
+  Evidence IDs where SourceNumber IDs were required, without requesting extraction repair.
+  Most final unknowns cascade from these missing regulator bindings. The second correction
+  was identical except its reason, producing a no-progress stop with budget remaining.
+  The LED was correctly classified passive in this run. Review also failed to reconcile
+  its own approximately 36 mA resistor calculation with a 10 mA rail allowance; this is not
+  proof of LED damage from a catalog test current alone.
+- **Attempt 10 — controller still unselected and configuration unresolved.** Repeated
+  MDBT50Q-1M7V searches and Nordic-specific fallback did not produce an accepted controller
+  selection. The model imposed that family constraint; the user only requested Bluetooth.
+  Both corrections repeated the same searches, the second adding a source URL rather than
+  considering another family. Selector explanations about stock, documentation and LoRa
+  categorization do not prove the fallback RAK4631 hybrid module was electrically unsuitable.
+  The other logger attempt selected a documented, stocked ESP32 module, showing a plausible
+  alternative family existed, not that it appeared in this run's restricted candidates.
+  Both corrections were consumed. The final regulator reread reduced ten observations to
+  three, losing previously extracted operating/current/thermal facts. Regulator bindings,
+  support evidence and interface evidence remained unresolved. A recorded sensor current
+  in Greek `μA` was rejected even though the
+  visually equivalent micro-sign `µA` is accepted, another concrete normalization limitation.
+  This cannot be counted as a functional Bluetooth logger, irrespective of the nine exported
+  purchasing rows or the remaining resource budget.
+
+The attempted recoveries were also independently inspected by separate read-only Codex
+reviewers. The adjustable-regulator calculation and active-mode sensor-current terminology
+were checked against original manufacturer pages, not just saved model explanations.
+No run was repaired or relabeled. Failure causes overlap; this is not an exclusive statistical
+attribution of each failure to either the model or infrastructure.
+
+### Integrity, decision and stop condition
+
+All ten terminal SSE snapshots agree with saved JSON, HTTP retrieval, JSON export and every
+CSV BOM field. Runtime SHA-256 fingerprints before every attempt and after the batch match.
+The same model configuration and resource limits are recorded in all ten runs. Final local
+verification passes **97 deterministic tests** and `git diff --check`. These demonstrate
+useful implementation properties, not trustworthy source interpretation or BOM correctness.
+The isolated evaluation backend on port 3002 was stopped after export verification; the user's
+existing backend/MCP services and unrelated frontend work were left untouched.
+
+The full manifest, untouched runs, SSE events, per-call observations and HTTP exports are in
+ignored `backend/data/evaluations/reliability-acceptance-20260930-v37/`. `batch.json` contains
+all run IDs, exact requests, unresolved findings, budgets, usage and verification results.
+Development attempts below remain separate and were not substituted for acceptance failures.
+
+**Decision:** the present model/workflow combination has not demonstrated reliable autonomous
+compatibility-checked BOM delivery, even within this small USB sensor/control scope. Earlier
+conditionally acceptable examples remain evidence of possibility, not consistency. The evidence
+does not support claiming that infrastructure is finished and only model intelligence remains,
+nor that removing more gates or merely increasing budgets would solve the problem. Source
+meaning and review errors coexist with real representation and recovery limitations. This
+batch does not establish that Flash-Lite can never work or that a larger architecture is needed.
+
+Per the user's instruction, implementation is **paused**. No prompt additions, special cases,
+model/settings changes, gate relaxation or further fix-and-retest cycle followed this batch.
+Only evaluation/status documentation was updated after runtime freeze.
+
+## Source-bound calculation reliability work (2026-09-30, development)
+
+The predeclared [acceptance batch](reliability-plan.md) is ten fresh requests on unchanged final
+code, at least nine usable checked results, and no materially false checked output under an
+independent original-source audit. Development trials below do not count toward that gate.
+
+Numeric binding version 1 retains extracted number roles, ownership and conditions instead of
+letting assembly rewrite their numerical meaning. Code resolves output tolerance, supply-scaled
+logic limits, linear input headroom and downstream current, and includes regulator own current
+in thermal loss. Public quantity fields remain materialized; legacy saved runs remain readable.
+Independent code review found and reproduced a direct-current bypass for linear inputs; those
+inputs now always use their actual downstream demand plus own current. Local regression coverage
+includes this bypass and real correction-helper flow that adds a missing regulator.
+
+| Development version / request / run | Lifecycle / compatibility / sourcing | Input / output tokens | Calls / corrections | Seconds |
+|---|---|---:|---:|---:|
+| 32 / sensor / `1b1a1397b9584eda8a7df3bda9dac587` | error / incomplete / available | 48,896 / 15,268 | 7 / 0 | 118.85 |
+| 33 / button / `f1486b9962544031bea132b214bdd61c` | error / incomplete / available | 63,695 / 12,438 | 8 / 0 | 36.42 |
+| 34 / button / `ca04d688a2b54ef4afcb45d672323ec6` | finished / incomplete / partial | 228,266 / 23,391 | 19 / 2 | 106.05 |
+| 34 / sensor / `ea49cc953d884ddba57214abad82c6d7` | finished / incomplete / available | 342,618 / 37,604 | 22 / 2 | 145.80 |
+| 35 / sensor / `5a05a3db70014b6ab181db744223c224` | finished / issues_found / available | 269,266 / 31,816 | 16 / 2 | 154.59 |
+| 36 / sensor / `89e48a15282746099dee3ea7a3a843b9` | finished / issues_found / available | 255,494 / 33,550 | 15 / 2 | 123.65 |
+
+The sensor run exhausted both 45-second attempts interpreting the SHT4x source. A targeted
+diagnostic of those same pages with a 90-second client timeout still failed with a provider
+`504 DEADLINE_EXCEEDED`; two attempts took 90.45 seconds total. This does not support increasing
+the production timeout. These pages/bytes also succeeded in earlier named runs. No production
+timeout, retry allowance or model change was made.
+
+The button run exposed a new provider `400 INVALID_ARGUMENT` at assembly. Targeted replays
+isolated the response schema. Making all quantity fields required still failed (0.95 s).
+Additionally removing the calculation enum allowed generation (8.60 s), but yielded invalid
+calculation names, so that workaround was not retained. Instead, removing only code-produced
+`Quantity.basis` and `evidence_ids` from the model schema preserved the calculation enum and
+returned a valid proposal (8.41 s, 11,975 input / 2,961 output tokens). This simpler ownership-aligned
+contract is prompt 34. Both fields remain in saved/public quantities; extraction still supplies
+source-number basis. No generic provider-schema transformer was introduced.
+
+Version 34 reached complete review/correction paths. Its button run could not source a required
+capacitor or read the selected regulator's source. Both corrections repeated unsuccessful work;
+the catalog also described a 300 mA regulator against the extracted 340 mA radio peak. Two
+targeted correction replays with clearer diagnostics still did not resolve both problems. Better
+error messages alone are not demonstrated to make repair reliable.
+
+The sensor run exposed two representation issues: a signed negative lower output tolerance and
+model-authored calculation labels inconsistent with their correct source-number references.
+Version 35 accepts the signed lower tolerance and derives each calculation from its destination
+and topology, removing another model choice. Read-only recomputation then reveals a **real thermal
+failure**, not an accepted BOM: AP2114H dissipation is about 0.759 W against 0.469 W at the recorded
+50°C ambient, 110°C target and 128°C/W package condition. No average-workload restriction was
+recorded. The original electrical table also limits initial ±1.5% output accuracy to light load;
+the record omitted applicable load/line effects. Independent review did not repair or approve it.
+The SHT4x pages that previously timed out succeeded in this run, further weakening the case for
+a local PDF defect or a larger client timeout.
+
+Version 35 also reached the real thermal gate: AZ1117C loss was 0.796 W against a recorded
+0.500 W allowance, with no adopted average workload. Its reviewer wrongly approved nominal-only
+arithmetic and ignored the recorded junction target; code kept the failure. Both corrections
+addressed reference bookkeeping first. Two remaining representation problems were isolated:
+supporting USB-guide references displaced a valid external-supply assumption, and redundant
+output/dropout references on a computed regulator input minimum were rejected instead of using
+the actual derived operands. Resolving these does not remove the thermal failure.
+
+Independent local review also found and closed two undercount paths: assumption-only zero own
+current despite available regulator evidence, and overwriting a conservative total average-current
+estimate with one smaller source number. Source recovery now preserves explicit URL hints and lets
+missing-source requests reach the existing bounded alternate-source discovery, including explicitly
+requested passive sources. These are local fixes, not evidence of successful autonomous completion.
+
+Version 36 attempted an average-current thermal repair but still ended at 0.479 W against a
+0.353 W allowance for its AP2112K. Its first correction cited multiple constituent currents in
+a direct operand that supports one numeric source, temporarily making thermal unresolved;
+the final correction restored a numeric failure. It also substituted an average-current source
+for peak demand. Prompt 37 separates explicitly documented average-current facts from peak/design
+demand and accepts qualitative evidence as context for assumed upstream supplies. Source-owned
+device ratings remain exact numeric bindings. The multi-reference thermal limitation was recorded,
+not expanded into another repair. The user's instruction is to freeze and evaluate, then pause
+if the gate is missed. No model, thinking setting, resource limit or orchestration change was made.
+
+Artifacts are in ignored `backend/data/evaluations/reliability-dev-20260930-v32` through `-v36`.
+The targeted proposal is diagnostic only, not a repaired or accepted BOM. Failed-call usage
+retains reservations where the provider did not return usage. Local verification currently
+passes 97 deterministic tests. The unchanged prompt-37 acceptance batch is recorded above;
+it failed the declared gate and further implementation is paused.
+
+## Reliability and representation scope (2026-09-30)
+
+This pass removes demonstrated representation blockers without claiming that a source-backed
+model review is infallible. It retains Flash-Lite, the explicit Python workflow, two correction
+rounds and all resource ceilings from the budget pass. No new service or dependency was added.
+The final prompt version is 31.
+
+Implemented changes:
+
+- A source-reviewed single-module capability need not invent a second purchased participant.
+  A one-ended I2C bus remains unresolved, as do missing electrical directions and numeric conflicts.
+- Passive current-only rail entries need not invent IC operating-voltage intervals. Their
+  current stays in the sum, with a current rail/load review of ratings and current limiting.
+  Active/module drivers of passive loads need an applicable driver/load review, not passive
+  VIH/VIL values. Supplied numerical limits still take the normal checks. Active devices are
+  not exempted, and reviewed catalog evidence does not replace active-device documents.
+- An empty requirement mapping remains unknown instead of aborting correction. Empty catalog
+  searches now report the actual failed query so correction can choose a different part/query.
+- Review citations to protected source-support observations resolve one hop to their source
+  evidence. Unknown references, empty underlying lists and invalid underlying references remain
+  blockers. Editable fulfillment records and numeric operands do not use this normalization.
+- Extraction explicitly returns an applicability boolean plus explanation. A live failure exposed
+  that a nonempty explanation saying a Bosch document did **not** apply to an NXP sensor had
+  previously authorized its facts. Negative/unestablished owners now lose those observations
+  and their inapplicable support needs; unrelated invalid references remain visible blockers.
+- Catalog-identified USB-C connectors receive the existing manufacturer Type-C guide through
+  ordinary acquisition/extraction, preserving their own source lead. No resistor values, parts
+  or port roles are inserted in code. This addresses observed missing CC support evidence.
+- A model read timeout uses the existing single transient retry, not another retry loop or
+  larger allowance. Provider quota failures still stop immediately.
+
+An experimental `manufacturer_guidance` substitute for numerical interface checks was removed.
+Its only live use approved logic compatibility from shared supply voltage and protocol names,
+without the intended explicit manufacturer basis. It had no independently accepted positive
+example; the accepted sensor below uses numerical checks. The experimental field is readable
+in old diagnostic snapshots but hidden from new proposals/reports and ignored by checks.
+
+All trials below are fresh natural-language requests with no manually supplied parts/pages,
+one board and US/USD sourcing. They use isolated port 3002, leaving the existing UI backend
+on 3001 untouched. Runtime artifacts are in the named ignored `backend/data/evaluations/`
+directories, with saved runs, complete SSE streams and observation-only call measurements.
+They are evaluation data, not live unit tests. Failed attempts remain recorded, not replaced.
+
+| Version / request / run | Lifecycle / compatibility / sourcing | Input / output tokens | Calls / corrections | Seconds |
+|---|---|---:|---:|---:|
+| 28 / sensor / `75b976393779499da8e60f9737a9c961` | error / incomplete / available | 54,232 / 8,279 | 7 / 0 | 76.69 |
+| 29 / sensor / `e92a5685c99f486f850ac23eefc01982` | error / incomplete / available | 48,877 / 13,018 | 7 / 0 | 116.33 |
+| 29 / pressure / `524993a8c0994b05ae9e930717635af7` | finished / incomplete / available | 266,347 / 27,901 | 21 / 2 | 184.72 |
+| 29 / button / `7161444311314a44aa9733c5440e1f95` | finished / incomplete / partial | 265,088 / 31,225 | 21 / 2 | 182.45 |
+| 30 / sensor / `36b821a2f88142259a4b46604338a3e1` | finished / checked / available | 243,761 / 30,969 | 16 / 2 | 133.91 |
+| 30 / pressure / `3c4bf6c1a66b4a0180650b9f88587764` | finished / incomplete / partial | 295,893 / 27,702 | 23 / 2 | 128.47 |
+| 30 / button / `31cccfe453604507a40b7ef9b907b604` | finished / issues_found / available | 205,244 / 25,890 | 18 / 2 | 107.89 |
+| 31 / sensor / `bba2271a22804a02a1e291e5d98b91bf` | error / incomplete / available | 183,245 / 21,747 | 12 / 0 | 163.08 |
+| 31 / sensor repeat / `e5aec768a45a42f49c377a633d7d6c27` | finished / checked / available | 207,436 / 25,365 | 15 / 1 | 122.24 |
+
+The queries are the exact sensor, pressure and button requests quoted in the budget section.
+The first two source timeouts occurred before assembly. An independent PDF audit found the
+same original SHT4x bytes/pages and production page slices used by earlier successful reads;
+there was no demonstrated local PDF-generation defect. The second trial exhausted both
+45-second attempts. Usage for failed attempts retains reservations, not confirmed provider
+billing. Artifact directories are `scope-20260930`, `scope-20260930-final`,
+`scope-20260930-verified` for the version-29 pressure/button pair, and `scope-20260930-v30`.
+Version 31 artifacts are in `scope-20260930-v31`. Its first trial completed source extraction
+and selection but exhausted both model attempts during whole-BOM review. This is a read-timeout
+failure, not a completed compatibility verdict or quota-exhaustion response. One bounded fresh
+repeat was made to exercise the final correction/review path; both trials remain recorded.
+
+The version-29 pressure run exposed the negative-applicability bug and omitted both USB-C
+CC resistors. It was not one cosmetic citation away from approval. The button run exposed the
+passive LED supply/threshold representation issues, but also lacked regulator evidence and
+excused a 344 mA peak load on a claimed 300 mA regulator. Its incomplete status was warranted.
+
+**Version-30 sensor accepted conditionally after independent original-source inspection.**
+All necessary support parts are present, including two CC resistors, separate regulator
+input/output capacitors, ESP32 EN support, sensor decoupling and I2C pullups. The selected
+parts have feasible supply and bidirectional logic compatibility under the recorded 500 mA
+USB source, 250 mA average load and 40°C ambient assumptions, with ordinary heater-off
+sensor measurement. It does not use either the experimental module-guidance path or passive
+exceptions. It still recomputes as checked with the final version-31 checks.
+
+This is not an error-free engineering report. The regulator review uses light-load output
+tolerance and nominal-only thermal arithmetic; independently including documented variation
+and quiescent loss still gives about 0.54 W against the recorded 0.56 W allowance. A sink-test
+voltage is mislabeled as an ESP32 maximum, but the actual documented limit still satisfies
+the sensor at rail corners. EN figure labels are confused, while the purchased 10 kΩ/1 µF
+parts match the manufacturer prose. These are nonblocking record-quality defects for this
+conditional component selection, not evidence that numerical explanations can be trusted blindly.
+
+The version-30 pressure result remains independently unacceptable. Its visible code blocker
+was a support-observation ID used where an evidence ID was expected. Normalizing that citation
+does not establish its 150 mA sustained workload: its cited assumption only describes the USB
+source, and the documented continuous-TX workload exceeds its chosen thermal target. Its
+interface review substitutes shared supply voltage for logic evidence and retains the previous
+sensor's name/address. Removing the experimental interface exception restores the missing
+direction blocker in a read-only replay. No saved result was relabeled.
+
+The version-30 button BOM omitted its regulator and assigned 4.75–5.25 V to a module rated
+for 3–3.6 V; the code correctly retained a failure. Its LED still carried unsupported explicit
+IC-style voltage bounds, which the passive exception deliberately does not waive. These are
+material/model-record failures, not reasons to suppress applicable checks.
+
+**The final version-31 sensor repeat also has a conditionally acceptable component selection.**
+It finished after one correction with 16 placements / 13 purchasing rows. Its own report has
+inaccurate 250 mA controller and 300 mA converter peak budgets despite source-observed 379 mA
+radio peaks. Correcting the USB peak to approximately 387 mA still fits the recorded 500 mA
+source and 1 A regulator. It also uses the 100°C/W copper-assisted thermal figure without
+declaring that copper condition. Conservatively using the documented 125°C/W figure, a widened
+3.21 V output floor and 6 mA quiescent current gives about 0.44 W against 0.48 W allowance at
+the **already recorded** 200 mA average and 50°C ambient bounds. No replacement part, extra
+heatsink or new duty schedule is required to establish that feasible conditional selection.
+This does not validate unrestricted continuous transmission or the erroneous peak/thermal
+records. An explicit average-load bound is an operating assumption; inventing one after a
+run or treating an unrelated USB-source assumption as a workload restriction is not equivalent.
+The repeat also includes an unnecessary but compatible reset switch. This is a selection-quality
+defect, not missing required support or an electrical mismatch.
+
+Final local verification passes all 79 deterministic tests and independent adversarial code
+review. Replaying 50 earlier saved/budget runs changes only one formerly single-ended BLE
+capability check from unknown to pass. Both historical accepted BOMs keep their outcomes.
+All nine terminal SSE snapshots agree with saved records and GET/JSON/CSV projections,
+ignoring only the now-hidden experimental interface selector in older public snapshots.
+Both version-31 records were also checked over actual HTTP. No original result was repaired
+or relabeled. The user's existing UI backend was left running and needs a restart to load
+these changes; unrelated frontend work was preserved.
+The small live sample demonstrates two accepted unattended sensor BOMs, not consistent success across
+the supported product scope. Remaining model selection, source interpretation, workload and
+self-review errors are material; loosening more checks would not establish reliability.
+
+## Input budget evaluation (2026-09-30)
+
+Reported UI run `89ef5bbcb03e42149991f3b880285623` stopped before its final review
+at 277,443 input tokens, 31,022 output tokens, 19 calls, two corrections and 137.07
+seconds. Its 15 placements produced 12 available purchasing rows. The seven current
+unknown checks were four requirement-review coverage checks, whole-review coverage,
+and two interfaces awaiting source-backed review. They were not seven demonstrated
+hardware faults, but the missing review cannot be assumed to pass. The saved record
+still needs scrutiny of regulator operating bounds and thermal-workload assumptions.
+
+Reconstructing that review from the unchanged saved design, cached original pages,
+and production context builder gives a **44,246-token input reservation**. Only
+22,557 remained, so admitting even that first review required a cumulative 321,689.
+It included 13 original PDF pages and one HTML page. The obvious duplicate payload
+was about 2,972 characters, approximately 991 estimated tokens, far short of the
+21,689-token shortfall. Existing code already groups identical candidate sets,
+deduplicates pages, omits duplicate extracted PDF text during review, and reuses
+unchanged source observations. No context representation was changed.
+
+The default input ceiling is now **400,000**, with every other limit, the model,
+prompt version 27, and evidence/compatibility check unchanged. Two reviews of the
+target's measured size would require a cumulative 365,935 before extra pages or a
+schema retry. The second review is an existing bounded source-follow-up path, not
+a new correction round. Earlier prompt-19 and prompt-21 recordings also show this
+follow-up review blocked by the old cap. 400,000 is practical headroom for this
+observed path, not a calculated optimum or a promise that every run can finish.
+Existing runs are not rewritten; refinements continue to inherit their parent's
+recorded limits. Fresh generations use the new default after backend restart.
+
+An independent local replay sent the reconstructed context through the real gateway
+with a local model fake. At 300,000 the gateway refused before invoking the fake and
+left usage unchanged. At 400,000 it admitted the review. Neither replay changed the
+compatibility badge or established engineering correctness. All 70 backend tests pass;
+the existing atomic token-reservation test now covers input as well as output caps,
+and one new local-fake regression covers assembly selection scope and correction retries.
+
+Fresh HTTP/SSE trials use Gemini 3.5 Flash-Lite with provider-default thinking, one
+board, US/USD, no parent run, no manually supplied part or source-page selections,
+and the same 400,000-token default. A separate loopback evaluation server preserves
+the already-running UI backend. Temporary observation-only instrumentation records
+per-stage estimates, usage and correction/review outputs without changing requests.
+Local artifacts are under `backend/data/evaluations/budget-20260930/`, including
+`runs/`, four `*-events.jsonl` streams and `calls.jsonl`; these remain ignored runtime
+data, not live unit-test fixtures.
+
+| Request / run | Lifecycle / compatibility / sourcing | Input / output tokens | Calls / corrections | Seconds |
+|---|---|---:|---:|---:|
+| Exact sensor request / `382c202a876848ccaae7e4100f572605` | error / incomplete / partial | 81,572 / 12,470 | 11 / 0 | 63.21 |
+| Wi-Fi pressure sensor / `f769013a1a764cfb87ca5b402b05245e` | finished / incomplete / available | 249,621 / 31,016 | 17 / 2 | 136.64 |
+| Bluetooth button remote / `a792223122d34880a1fa47e44ed81355` | finished / incomplete / available | 207,587 / 26,886 | 15 / 2 | 114.00 |
+| Exact sensor repeat / `745b2857730a4f0f8b103f25fd9c9c8e` | finished / incomplete / available | 386,977 / 30,026 | 25 / 2 | 156.67 |
+
+The exact request is `A temperature and humidity sensor with Wi-Fi and Bluetooth,
+powered by USB-C (5V) for indoor use.` Its first fresh trial selected a different
+controller assembly than the reported UI run and stopped when a correction supplied
+an empty requirement-to-component mapping. It also lacked usable controller evidence.
+This is a separate model-output failure, not input-budget exhaustion. It is retained
+as a failed trial, and the exact request was repeated once because the first attempt
+did not exercise a full correction cycle.
+
+The pressure request is `A USB-C (5V) powered indoor air pressure sensor with Wi-Fi
+for data logging. Use a board-mountable controller module, not a development board.`
+Both direct corrections and the final review ran. Four remaining signal checks cite
+controller evidence for sensor limits. The first correction improved mapping and
+added the missing reverse direction but unnecessarily duplicated per-wire records;
+the second still did not supply sensor-owned evidence. A new 3 A USB-source claim
+was also not justified by the original source assumption. The final incomplete
+status is appropriate. No source rereads or assembly reruns occurred in correction.
+
+The remote request is `A USB-C (5V) powered Bluetooth button remote for indoor use,
+with one pushbutton and a status LED.` Both direct corrections and the final review
+ran, but LED source acquisition failed and repairs continued to reuse wrong-owner
+citations. A one-ended radio capability was unnecessarily modeled as a board
+interface; a switch signal bound also lacked an applicable basis. The second repair
+was largely ineffective. These are evidence/representation problems, not extra
+orchestration rounds or evidence requirements introduced by this budget change.
+
+### Avoidable selection retries and final adjustment
+
+The exact-request repeat exhausted even the 400,000 input allowance before its final
+review. Its next review needed a 36,344-token reservation, or 423,321 cumulatively.
+The stage trace exposed an unnecessary retry: after an explicit correction failed
+to select resistor R3 with both its narrow and broad queries, assembly repeated
+both unchanged searches. Assembly cannot replace an existing component specification,
+so this was not selection work for a newly proposed part. Those two calls consumed
+**39,288 input tokens**, two model calls and two supplier calls. Removing them from
+that recorded trajectory would leave room for the review at 384,033 reserved tokens.
+This arithmetic is a counterfactual admission check, not a claim that a fresh review
+will pass or that subsequent model output would be identical.
+
+The second and only other runtime change is to select **actually new placement IDs**
+after assembly. Initial selection and explicit correction still search all pending
+placements with the existing narrow/broad attempts. A repeated existing ID in an
+assembly proposal does not count as new. No prompt, context compression, orchestration,
+retry allowance, source requirement or compatibility check was changed. The regression
+failed on the old implementation and passes with this fix, including successful
+selection of a new support part and later correction of an existing failed part.
+
+The final fresh sample consists of the exact sensor request and the pressure request,
+using both adjustments. Its separate runtime artifacts are under
+`backend/data/evaluations/budget-20260930-final/`. The four cap-only diagnostics above
+are retained, not replaced by the final sample.
+
+| Request / run | Lifecycle / compatibility / sourcing | Input / output tokens | Calls / corrections | Seconds |
+|---|---|---:|---:|---:|
+| Exact sensor / `185954cd4b284c61ab383c11a310aba3` | finished / incomplete / available | 326,933 / 32,610 | 20 / 2 | 146.61 |
+| Wi-Fi pressure sensor / `c49322e79475467cbca1e887e5750b90` | finished / incomplete / partial | 243,047 / 22,980 | 20 / 2 | 98.04 |
+
+Both final runs completed two corrections and their final review without exhausting
+any run budget or encountering provider quota errors. The sensor's final review
+started at 297,916 input tokens with a 33,608-token reservation, requiring 331,524
+cumulatively. Its preceding assembly would already have needed 301,061 reserved
+tokens. This is fresh evidence that 300,000 could block permitted work even after
+removing the duplicate selection. The pressure's final review required 247,958
+reserved tokens, within either cap. They used 15 placements / 12 purchasing rows
+and 12 placements / 8 purchasing rows, respectively.
+
+The sensor's final correction replaced its regulator after a thermal failure.
+The replacement NCP1117DT33T5G datasheet returned HTTP 403; no usable replacement
+source was found. Old regulator evidence was correctly invalidated rather than
+inherited. The final model review returned pass findings, but code checks retained
+11 unknowns covering missing regulator/support evidence, electrical and thermal
+bases, and invalid review references. This is a material evidence failure, not
+an approved BOM awaiting cosmetic cleanup. All parts were already selected before
+the last assembly, so the selection change did not cause these gaps.
+
+The pressure trial never selected its BME280 sensor. Both explicit corrections
+still attempted narrow and broad catalog searches, but returned no usable candidate.
+It retained 11 unknowns, including sensor requirement/supply/interface checks and
+missing regulator/support citations. Its repeated source-selection calls were the
+existing bounded additional-source attempt following a failed connector download,
+not new orchestration or a consequence of the selection fix.
+
+All six terminal SSE snapshots match saved records, GET and JSON exports, with
+matching CSV and ordered event sequences. The four diagnostic API checks used the
+local Flask test client; both final runs were also verified through actual HTTP.
+Independent code review and all 70 deterministic backend tests pass. The existing
+UI backend was not restarted; it must restart to load the new code/default. Original
+saved results were not repaired or relabeled, and unrelated frontend work was left intact.
+
+**Conclusion:** retain the 400,000 default plus the small duplicate-selection fix.
+The final sample validates budget admission through two full correction/review
+cycles, not reliable BOM correctness. None of these six trials produced a checked
+BOM. Remaining catalog, source-access and model-citation failures warrant separate
+work; another budget increase would not resolve them. This small sample does not
+establish a success rate or guarantee completion of every supported request.
 
 ## BOM-only scope implementation and verification
 
