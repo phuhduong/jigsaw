@@ -1,0 +1,635 @@
+.parts-panel,
+.review-panel,
+.component-detail {
+  min-width: 0;
+  color: var(--ink);
+}
+.report-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.report-empty {
+  padding: 36px 0;
+  font-size: 15px;
+  color: var(--muted);
+}
+.parts-panel {
+  padding: 8px 22px 0;
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+.workbench .parts-panel {
+  border: 0;
+}
+.bom-build-quantity {
+  margin: 10px 0 16px;
+  font-size: 14px;
+  color: var(--muted);
+}
+.bom-table-scroll {
+  overflow-x: auto;
+}
+.bom-mobile-label {
+  display: none;
+}
+.bom-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 620px;
+  text-align: left;
+}
+.bom-table th {
+  padding: 12px 18px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+.bom-table th:first-child,
+.bom-table td:first-child {
+  padding-left: 0;
+}
+.bom-table th:last-child,
+.bom-table td:last-child {
+  padding-right: 0;
+}
+.bom-table td {
+  padding: 15px 18px;
+  vertical-align: middle;
+  font-size: 14px;
+  border-bottom: 1px solid var(--line);
+}
+.bom-table tbody > tr {
+  transition: background 0.15s;
+}
+.bom-table tbody > tr:hover {
+  background: color-mix(in srgb, var(--paper) 65%, transparent);
+}
+.bom-table .bom-row-selected,
+.bom-table .bom-row-selected:hover {
+  background: color-mix(in srgb, var(--lavender) 45%, transparent);
+}
+.bom-part-cell {
+  width: 49%;
+  min-width: 250px;
+}
+.report-part-button {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  width: 100%;
+  min-height: 56px;
+  border: 0;
+  padding: 0;
+  background: none;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+.report-part-button:hover .bom-part-title {
+  color: var(--violet);
+}
+.report-part-button:disabled {
+  opacity: 1;
+  cursor: default;
+}
+.bom-thumbnail {
+  display: flex;
+  align-items: center;
+  flex: 0 0 76px;
+  width: 76px;
+  height: 58px;
+  padding: 5px;
+  background: #f1f1ee;
+  border: 1px solid #e7e8e4;
+}
+.bom-thumbnail-controller {
+  background: #f1eef6;
+  border-color: #e8e3ef;
+}
+.bom-thumbnail-sensor {
+  background: #edf3f5;
+  border-color: #e0e9ed;
+}
+.bom-thumbnail-power {
+  background: #edf2ed;
+  border-color: #e0e8df;
+}
+.bom-thumbnail .part-illustration {
+  width: 100%;
+  height: auto;
+}
+.bom-part-text {
+  min-width: 0;
+}
+.bom-part-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: -0.025em;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  transition: color 0.15s;
+}
+.bom-issue {
+  display: inline-flex;
+  color: var(--red);
+}
+.bom-identity {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  display: block;
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+.bom-quantity {
+  font-variant-numeric: tabular-nums;
+  width: 10%;
+}
+.bom-money {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  width: 21%;
+}
+.bom-cell-note {
+  display: block;
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.bom-purchase-cell {
+  white-space: nowrap;
+}
+.bom-buy-link,
+.component-links a {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink);
+  text-decoration: none;
+  font-size: 13px;
+}
+.bom-buy-link {
+  border-bottom: 1px solid #c7ccc8;
+  padding: 4px 0;
+}
+.bom-buy-link:hover,
+.component-links a:hover {
+  color: var(--violet);
+  border-color: var(--violet);
+}
+.bom-stock {
+  display: block;
+  margin-top: 7px;
+}
+.stock-exception {
+  color: var(--amber);
+  font-size: 12px;
+}
+.bom-footer {
+  display: flex;
+  justify-content: flex-end;
+  align-items: baseline;
+  gap: 24px;
+  padding: 18px 0 20px;
+}
+.bom-footer > span {
+  font-size: 13px;
+  color: var(--muted);
+}
+.bom-footer > div {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  text-align: right;
+}
+.bom-footer strong {
+  font-family: var(--font-display);
+  font-size: 25px;
+  font-weight: 500;
+  letter-spacing: -0.8px;
+  font-variant-numeric: tabular-nums;
+}
+.bom-missing-label {
+  display: block;
+  margin-top: 5px;
+  font-size: 12px;
+  color: var(--red);
+}
+.bom-row-pending .bom-missing-label {
+  color: var(--muted);
+}
+.bom-table .bom-missing-message {
+  color: var(--muted);
+  font-size: 13px;
+}
+.bom-row-missing .bom-thumbnail {
+  opacity: 0.65;
+}
+.design-notes-section {
+  display: grid;
+  grid-template-columns: 170px minmax(0, 1fr);
+  gap: 28px;
+  padding: 22px 0;
+  border-bottom: 1px solid var(--line);
+}
+.design-notes-section:first-child {
+  padding-top: 6px;
+}
+.design-notes-section:last-child {
+  border-bottom: 0;
+  padding-bottom: 6px;
+}
+.design-notes-section h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.65;
+  letter-spacing: -0.1px;
+}
+.design-note-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-width: 850px;
+}
+.design-note-list > li {
+  position: relative;
+  margin: 0 0 17px;
+  padding-left: 16px;
+  font-size: 14px;
+  line-height: 1.75;
+  overflow-wrap: anywhere;
+}
+.design-note-list > li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.78em;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #a5aca5;
+}
+.design-note-list > li:last-child {
+  margin-bottom: 0;
+}
+.design-failures h2 {
+  color: var(--red);
+}
+.compatibility-issue {
+  margin-bottom: 22px;
+  padding-left: 15px;
+  border-left: 2px solid #cb9b91;
+  max-width: 850px;
+}
+.compatibility-issue:last-child {
+  margin-bottom: 0;
+}
+.compatibility-issue > p {
+  margin: 0 0 10px;
+  font-size: 14px;
+  line-height: 1.75;
+  overflow-wrap: anywhere;
+}
+.compatibility-issue > p:last-child {
+  margin-bottom: 0;
+}
+.compatibility-issue .issue-remedy {
+  color: var(--muted);
+}
+.report-references {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  margin-top: 9px;
+}
+.reference-button {
+  border: 0;
+  border-bottom: 1px solid #c9bfd7;
+  padding: 2px 0;
+  background: none;
+  color: var(--violet);
+  font-size: 12px;
+  text-align: left;
+  line-height: 1.6;
+}
+.reference-button:hover {
+  border-color: var(--violet);
+}
+.support-note {
+  margin-bottom: 22px;
+  max-width: 850px;
+}
+.support-note:last-child {
+  margin-bottom: 0;
+}
+.support-note h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 500;
+}
+.support-note p {
+  margin: 0 0 10px;
+  font-size: 14px;
+  line-height: 1.75;
+}
+.component-detail {
+  --part-tint: #ebeeea;
+  padding: 24px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-top: 3px solid #c8cfc9;
+}
+.workbench .component-detail {
+  border-left: 0;
+  border-right: 0;
+  border-bottom: 0;
+}
+.component-detail-controller {
+  --part-tint: #efecf5;
+  border-top-color: #b9aecb;
+}
+.component-detail-sensor {
+  --part-tint: #eaf1f5;
+  border-top-color: #a9c1cf;
+}
+.component-detail-power {
+  --part-tint: #eaf0e9;
+  border-top-color: #afc3af;
+}
+.component-title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 15px;
+}
+.component-title-row h2 {
+  margin: 0;
+  font-size: 21px;
+  line-height: 1.35;
+  font-weight: 500;
+  letter-spacing: -0.6px;
+}
+.component-title-row .inspector-close {
+  flex-shrink: 0;
+  min-height: 30px;
+  margin-top: -4px;
+  margin-right: -8px;
+  padding: 6px;
+}
+.component-identity {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  margin-top: 23px;
+}
+.component-identity > div {
+  min-width: 0;
+}
+.component-illustration {
+  display: flex;
+  align-items: center;
+  flex: 0 0 75px;
+  width: 75px;
+  height: 65px;
+  padding: 4px;
+  background: var(--part-tint);
+}
+.component-illustration .part-illustration {
+  height: auto;
+}
+.component-mpn {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.component-manufacturer {
+  margin: 5px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.component-missing {
+  font-size: 14px;
+  color: var(--red);
+}
+.component-pending {
+  font-size: 14px;
+  color: var(--muted);
+}
+.component-purpose {
+  font-size: 14px;
+  line-height: 1.75;
+  margin: 21px 0 0;
+  overflow-wrap: anywhere;
+}
+.component-selection-error {
+  font-size: 14px;
+  line-height: 1.7;
+  margin: 18px 0 0;
+  color: var(--red);
+}
+.component-purchase {
+  padding-top: 21px;
+}
+.component-price-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  align-items: baseline;
+}
+.component-price {
+  font-size: 19px;
+  letter-spacing: -0.4px;
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+.component-price > span {
+  font-size: 12px;
+  color: var(--muted);
+  margin-left: 7px;
+  letter-spacing: 0;
+}
+.component-links {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 14px 18px;
+  margin-top: 17px;
+}
+.component-links .component-supplier {
+  padding: 8px 11px;
+  border: 1px solid #cbd0cb;
+  background: #fafbf9;
+}
+.component-links .component-supplier:hover {
+  background: var(--part-tint);
+}
+.component-rationale {
+  margin-top: 23px;
+  border-top: 1px solid var(--line);
+  padding-top: 16px;
+}
+.component-rationale > summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 15px;
+  padding: 2px 0;
+  font-size: 13px;
+  cursor: pointer;
+  list-style: none;
+}
+.component-rationale > summary::-webkit-details-marker {
+  display: none;
+}
+.component-rationale[open] > summary svg {
+  transform: rotate(180deg);
+}
+.component-rationale > p {
+  margin: 13px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.75;
+  overflow-wrap: anywhere;
+}
+.component-failures {
+  margin-top: 23px;
+  padding-top: 19px;
+  border-top: 1px solid var(--line);
+}
+.component-failures h3 {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--red);
+  margin: 0 0 14px;
+}
+.component-failures .compatibility-issue > p {
+  font-size: 13px;
+}
+@media (max-width: 760px) {
+  .parts-panel {
+    padding: 10px 20px 0;
+  }
+  .bom-table th,
+  .bom-table td {
+    padding-right: 13px;
+    padding-left: 13px;
+  }
+  .design-notes-section {
+    grid-template-columns: 1fr;
+    gap: 16px;
+    padding: 23px 0;
+  }
+  .component-detail {
+    padding: 22px;
+  }
+}
+@media (max-width: 560px) {
+  .parts-panel {
+    padding: 0 18px;
+  }
+  .bom-table {
+    display: block;
+    min-width: 0;
+  }
+  .bom-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+  }
+  .bom-table tbody {
+    display: block;
+  }
+  .bom-table tbody > tr {
+    display: grid;
+    grid-template-columns: minmax(0, 0.5fr) minmax(0, 1fr) minmax(0, 1.3fr);
+    gap: 10px 12px;
+    padding: 16px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .bom-table td {
+    display: block;
+    width: auto;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+  }
+  .bom-part-cell,
+  .bom-missing-message {
+    grid-column: 1 / -1;
+  }
+  .report-part-button {
+    gap: 14px;
+  }
+  .bom-part-title {
+    font-size: 14px;
+  }
+  .bom-thumbnail {
+    flex-basis: 65px;
+    width: 65px;
+    height: 53px;
+  }
+  .bom-mobile-label {
+    display: block;
+    margin-bottom: 5px;
+    color: var(--muted);
+    font-size: 11px;
+  }
+  .bom-money,
+  .bom-purchase-cell {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .bom-table .bom-purchase-cell {
+    display: flex;
+    align-items: center;
+    align-self: end;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .bom-purchase-cell .bom-stock {
+    margin-top: 0;
+  }
+  .bom-footer {
+    justify-content: space-between;
+    gap: 15px;
+    padding: 20px 0;
+  }
+  .bom-footer strong {
+    font-size: 20px;
+  }
+}
+@media (pointer: coarse) {
+  .bom-buy-link,
+  .component-links a,
+  .reference-button,
+  .component-rationale > summary {
+    min-height: 44px;
+  }
+  .reference-button {
+    display: inline-flex;
+    align-items: center;
+  }
+}

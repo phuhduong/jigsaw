@@ -3,6 +3,7 @@ import {
   Links,
   Meta,
   Outlet,
+  Link,
   Scripts,
   ScrollRestoration,
 } from "react-router";
@@ -11,15 +12,21 @@ import type { Route } from "./+types/root";
 import stylesheet from "./app.css?url";
 
 export const links: Route.LinksFunction = () => [
-  { rel: "preconnect", href: "https://fonts.googleapis.com" },
+  { rel: "icon", href: "/favicon.ico", sizes: "16x16 32x32 48x48 64x64" },
+  { rel: "icon", href: "/favicon.svg", type: "image/svg+xml", sizes: "any" },
   {
-    rel: "preconnect",
-    href: "https://fonts.gstatic.com",
+    rel: "preload",
+    href: "/fonts/space-grotesk-latin.woff2",
+    as: "font",
+    type: "font/woff2",
     crossOrigin: "anonymous",
   },
   {
-    rel: "stylesheet",
-    href: "https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&display=swap",
+    rel: "preload",
+    href: "/fonts/ibm-plex-sans-latin.woff2",
+    as: "font",
+    type: "font/woff2",
+    crossOrigin: "anonymous",
   },
   { rel: "stylesheet", href: stylesheet },
 ];
@@ -34,6 +41,9 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <Links />
       </head>
       <body>
+        <a href="#main-content" className="skip-link">
+          Skip to content
+        </a>
         {children}
         <ScrollRestoration />
         <Scripts />
@@ -47,30 +57,27 @@ export default function App() {
 }
 
 export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
-  let message = "Oops!";
+  let message = "This page could not be opened.";
   let details = "An unexpected error occurred.";
-  let stack: string | undefined;
 
   if (isRouteErrorResponse(error)) {
-    message = error.status === 404 ? "404" : "Error";
+    message =
+      error.status === 404
+        ? "Page not found"
+        : "This page could not be opened.";
     details =
       error.status === 404
         ? "The requested page could not be found."
-        : error.statusText || details;
-  } else if (import.meta.env.DEV && error && error instanceof Error) {
-    details = error.message;
-    stack = error.stack;
+        : "Try opening the page again.";
   }
 
   return (
-    <main className="pt-16 p-4 container mx-auto">
+    <main id="main-content" className="error-page">
       <h1>{message}</h1>
       <p>{details}</p>
-      {stack && (
-        <pre className="w-full p-4 overflow-x-auto">
-          <code>{stack}</code>
-        </pre>
-      )}
+      <Link to="/" className="button">
+        Return to Jigsaw
+      </Link>
     </main>
   );
 }

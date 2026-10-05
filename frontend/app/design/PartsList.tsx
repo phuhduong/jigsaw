@@ -1,58 +1,257 @@
-import { Package, Download, ExternalLink } from "lucide-react";
-import { Button } from "../components/ui/button";
-import { Card } from "../components/ui/card";
-import { exportUrl, safeUrl } from "../services/api/designRunApi";
-import type { DesignSnapshot } from "../services/api/designRunApi";
+import { ArrowUpRight, CircleAlert } from "lucide-react";
+import { getSafeUrl, type DesignSnapshot } from "../services/api/designRunApi";
+import { getComponentRole, getComponentTitle } from "./componentPresentation";
+import PartIllustration from "./PartIllustration";
+import {
+  formatMoney,
+  getCurrentFindings,
+  getSubjectComponentIds,
+  isBlockingFinding,
+  isSelectedProduct,
+} from "./reportHelpers";
+import "./report.css";
 
-export default function PartsList({ snapshot }: { snapshot: DesignSnapshot | null }) {
-  const rows = snapshot?.bom ?? [];
-  const totals = new Map<string, number>();
-  for (const row of rows) {
-    if (row.extended_price !== null) totals.set(row.currency, (totals.get(row.currency) ?? 0) + row.extended_price);
+export default function PartsList({
+  snapshot,
+  onSelect,
+  selectedId,
+}: {
+  snapshot: DesignSnapshot;
+  onSelect: (id: string) => void;
+  selectedId?: string | null;
+}) {
+  const totalsByCurrency = new Map<string, number>();
+  for (const row of snapshot.bom) {
+    if (row.extended_price !== null)
+      totalsByCurrency.set(
+        row.currency,
+        (totalsByCurrency.get(row.currency) ?? 0) + row.extended_price,
+      );
   }
-  const unpriced = rows.filter(row => row.extended_price === null).length;
-  const unresolved = snapshot?.components.filter(component => !component.product).length ?? 0;
+  const hasUnpricedRows = snapshot.bom.some(
+    (row) => row.extended_price === null,
+  );
+  const unselectedComponents = snapshot.components.filter(
+    (component) => !isSelectedProduct(component.product),
+  );
+  const isRunning = snapshot.lifecycle === "running";
+  const failedComponentIds = new Set(
+    isRunning
+      ? []
+      : getCurrentFindings(snapshot)
+          .filter(isBlockingFinding)
+          .flatMap((finding) =>
+            finding.subject_ids.flatMap((id) =>
+              getSubjectComponentIds(snapshot, id),
+            ),
+          ),
+  );
   return (
-    <section className="h-full flex flex-col">
-      <div className="p-6 border-b border-zinc-800">
-        <h2 className="text-lg flex items-center gap-2"><Package className="w-5 h-5 text-emerald-400" /> Bill of materials</h2>
-        <p className="text-sm text-zinc-400 mt-2">{snapshot?.lifecycle === "running" ? "Provisional selections · review in progress" : "Parts, quantities, and purchasing links"}</p>
-        {snapshot && <p className="text-xs text-zinc-500 mt-2">Sourcing: {snapshot.sourcing}</p>}
-      </div>
-      <div className="flex-1 p-6 space-y-4">
-        {rows.length === 0 && <p className="text-sm text-zinc-500 py-8 text-center">No parts selected yet.</p>}
-        {rows.map(row => (
-          <Card key={`${row.manufacturer}:${row.mpn}:${row.package}`} className="bg-zinc-900/50 border-zinc-800 p-4">
-            <div className="flex justify-between gap-3">
-              <div className="min-w-0"><h3 className="font-medium break-words">{row.mpn}</h3><p className="text-xs text-zinc-500 mt-1">{row.manufacturer}</p></div>
-              <div className="text-sm text-emerald-400 whitespace-nowrap">{row.unit_price === null ? "Price unknown" : `${row.currency} ${row.unit_price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 })}`}</div>
-            </div>
-            <p className="text-xs text-zinc-400 mt-3">{row.reference_ids.join(", ")} · {row.package || "Package not specified"}</p>
-            <p className="text-sm text-zinc-400 mt-2">{[...new Set(row.purposes)].join("; ")}</p>
-            <p className="text-xs text-zinc-500 mt-3">{row.installed_quantity} per board · {row.board_quantity} board(s) · order {row.order_quantity}</p>
-            <p className={`text-xs mt-2 ${row.availability === "available" ? "text-emerald-400" : "text-amber-400"}`}>{row.availability.replaceAll("_", " ")}</p>
-            {row.ordering_note && <p className="text-xs text-zinc-500 mt-2">{row.ordering_note}</p>}
-            <div className="flex gap-4 mt-4 pt-3 border-t border-zinc-800 text-xs text-emerald-400">
-              {safeUrl(row.purchase_url) && <a href={safeUrl(row.purchase_url)} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1"><ExternalLink className="w-3 h-3" /> Buy part</a>}
-              {safeUrl(row.datasheet_url) && <a href={safeUrl(row.datasheet_url)} target="_blank" rel="noopener noreferrer">Datasheet</a>}
-            </div>
-          </Card>
-        ))}
-        {unresolved > 0 && <p className="text-sm text-amber-400">{unresolved} required selection(s) remain unresolved.</p>}
-      </div>
-      {snapshot && <div className="p-6 border-t border-zinc-800 space-y-3">
-        {rows.length > 0 && <>
-          <p className="text-sm text-zinc-400">{unpriced || unresolved ? "Known-price subtotal" : "Parts subtotal"}</p>
-          {[...totals].map(([currency, total]) => <p key={currency} className="text-xl text-emerald-400">{currency} {total.toFixed(2)}</p>)}
-          {unpriced > 0 && <p className="text-xs text-amber-400">{unpriced} row(s) have unknown pricing.</p>}
-          <p className="text-xs text-zinc-500">Shipping and tax excluded. Stock and prices may change.</p>
-        </>}
-        <div className="flex gap-2">
-          <Button asChild className="bg-emerald-600 hover:bg-emerald-500 text-white"><a href={exportUrl(snapshot.id, "csv")}><Download className="w-4 h-4" /> CSV</a></Button>
-          <Button asChild variant="outline" className="border-zinc-700"><a href={exportUrl(snapshot.id, "json")}>Full JSON report</a></Button>
+    <section className="parts-panel" aria-label="Parts list">
+      {snapshot.options.board_quantity > 1 && (
+        <p className="bom-build-quantity">
+          For {snapshot.options.board_quantity.toLocaleString()} boards
+        </p>
+      )}
+      {snapshot.bom.length > 0 || unselectedComponents.length > 0 ? (
+        <div
+          className="bom-table-scroll"
+          tabIndex={0}
+          role="region"
+          aria-label="Parts table"
+        >
+          <table className="bom-table" role="table">
+            <caption className="report-sr-only">
+              Parts for {snapshot.options.board_quantity}{" "}
+              {snapshot.options.board_quantity === 1 ? "board" : "boards"}.
+              Price is the total for the order quantity.
+            </caption>
+            <thead role="rowgroup">
+              <tr role="row">
+                <th scope="col" role="columnheader">
+                  Part
+                </th>
+                <th scope="col" role="columnheader">
+                  Qty
+                </th>
+                <th scope="col" role="columnheader">
+                  Price
+                </th>
+                <th scope="col" role="columnheader">
+                  Supplier
+                </th>
+              </tr>
+            </thead>
+            <tbody role="rowgroup">
+              {snapshot.bom.map((row) => {
+                const placements = row.reference_ids
+                  .map((id) =>
+                    snapshot.components.find((part) => part.id === id),
+                  )
+                  .filter((part) => part !== undefined);
+                const primaryComponent = placements[0];
+                const title =
+                  [...new Set(placements.map(getComponentTitle))].join(" / ") ||
+                  row.mpn;
+                const role = primaryComponent
+                  ? getComponentRole(primaryComponent)
+                  : "other";
+                const illustrationTitle = primaryComponent
+                  ? getComponentTitle(primaryComponent)
+                  : "";
+                const purchaseUrl = getSafeUrl(row.purchase_url);
+                const primaryId = primaryComponent?.id;
+                const hasIssue = row.reference_ids.some((id) =>
+                  failedComponentIds.has(id),
+                );
+                const isSelected = Boolean(
+                  selectedId && row.reference_ids.includes(selectedId),
+                );
+                return (
+                  <tr
+                    role="row"
+                    key={`${row.manufacturer}:${row.mpn}:${row.package}`}
+                    className={isSelected ? "bom-row-selected" : ""}
+                  >
+                    <td role="cell" className="bom-part-cell">
+                      <button
+                        className="report-part-button"
+                        onClick={() => primaryId && onSelect(primaryId)}
+                        disabled={!primaryId}
+                        aria-current={isSelected ? "true" : undefined}
+                      >
+                        <span className={`bom-thumbnail bom-thumbnail-${role}`}>
+                          <PartIllustration
+                            role={role}
+                            wireless={
+                              illustrationTitle === "Wireless controller"
+                            }
+                            usb={illustrationTitle.startsWith("USB-C")}
+                          />
+                        </span>
+                        <span className="bom-part-text">
+                          <span className="bom-part-title">
+                            {title}
+                            {hasIssue && (
+                              <span className="bom-issue">
+                                <CircleAlert size={14} aria-hidden="true" />
+                                <span className="report-sr-only">
+                                  Compatibility issue
+                                </span>
+                              </span>
+                            )}
+                          </span>
+                          <span className="bom-identity">{row.mpn}</span>
+                        </span>
+                      </button>
+                    </td>
+                    <td role="cell" className="bom-quantity">
+                      <span className="bom-mobile-label" aria-hidden="true">
+                        Qty
+                      </span>
+                      {row.order_quantity}
+                      {row.order_quantity > row.required_quantity && (
+                        <span className="bom-cell-note">
+                          {row.required_quantity} needed
+                        </span>
+                      )}
+                    </td>
+                    <td role="cell" className="bom-money">
+                      <span className="bom-mobile-label" aria-hidden="true">
+                        Price
+                      </span>
+                      {row.extended_price === null ? (
+                        <span className="text-muted">Not quoted</span>
+                      ) : (
+                        formatMoney(row.extended_price, row.currency)
+                      )}
+                    </td>
+                    <td role="cell" className="bom-purchase-cell">
+                      {purchaseUrl ? (
+                        <a
+                          className="bom-buy-link"
+                          href={purchaseUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          View supplier{" "}
+                          <ArrowUpRight size={16} aria-hidden="true" />
+                        </a>
+                      ) : (
+                        <span className="text-muted">No supplier link</span>
+                      )}
+                      {row.availability === "out_of_stock" && (
+                        <span className="bom-stock stock-exception">
+                          {row.stock === null
+                            ? "Unavailable"
+                            : row.stock === 0
+                              ? "Out of stock"
+                              : `Only ${row.stock} available`}
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+              {unselectedComponents.map((part) => {
+                const title = getComponentTitle(part);
+                const role = getComponentRole(part);
+                return (
+                  <tr
+                    role="row"
+                    key={part.id}
+                    className={`bom-row-missing${isRunning ? " bom-row-pending" : ""}${selectedId === part.id ? " bom-row-selected" : ""}`}
+                  >
+                    <td role="cell" className="bom-part-cell">
+                      <button
+                        className="report-part-button"
+                        onClick={() => onSelect(part.id)}
+                        aria-current={
+                          selectedId === part.id ? "true" : undefined
+                        }
+                      >
+                        <span className={`bom-thumbnail bom-thumbnail-${role}`}>
+                          <PartIllustration
+                            role={role}
+                            wireless={title === "Wireless controller"}
+                            usb={title.startsWith("USB-C")}
+                          />
+                        </span>
+                        <span className="bom-part-text">
+                          <span className="bom-part-title">{title}</span>
+                          <span className="bom-missing-label">
+                            {isRunning ? "Selecting…" : "Part needed"}
+                          </span>
+                        </span>
+                      </button>
+                    </td>
+                    <td role="cell" className="bom-missing-message" colSpan={3}>
+                      {!isRunning && "No suitable part selected"}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
-        <p className="text-xs text-zinc-500">Exports retain the saved review status. The JSON report includes unresolved issues.</p>
-      </div>}
+      ) : (
+        <p className="report-empty">No parts have been selected yet.</p>
+      )}
+      {snapshot.bom.length > 0 && (
+        <footer className="bom-footer">
+          <span>
+            {hasUnpricedRows || unselectedComponents.length > 0
+              ? "Partial total"
+              : "Total"}
+          </span>
+          <div>
+            {[...totalsByCurrency].map(([currency, total]) => (
+              <strong key={currency}>{formatMoney(total, currency)}</strong>
+            ))}
+            {totalsByCurrency.size === 0 && <strong>Not quoted</strong>}
+          </div>
+        </footer>
+      )}
     </section>
   );
 }

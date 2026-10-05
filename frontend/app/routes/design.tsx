@@ -1,8 +1,9 @@
-import type { Route } from "./+types/design";
 import { useLocation } from "react-router";
-import DesignInterface from "../design/index";
+import { useMemo } from "react";
+import DesignPage from "../design/index";
+import type { InitialRequest } from "../services/api/designRunApi";
 
-export function meta({}: Route.MetaArgs) {
+export function meta() {
   return [
     { title: "Jigsaw" },
     {
@@ -13,10 +14,18 @@ export function meta({}: Route.MetaArgs) {
   ];
 }
 
-export default function Design() {
+export default function DesignRoute() {
   const location = useLocation();
-  const query = (location.state as { query?: string })?.query || "";
+  const initialRequest = useMemo(() => {
+    const state = location.state as {
+      request?: InitialRequest;
+      query?: string;
+    } | null;
+    return (
+      state?.request ?? (state?.query ? { query: state.query } : undefined)
+    );
+  }, [location.state]);
   const runId = new URLSearchParams(location.search).get("run");
 
-  return <DesignInterface initialQuery={query} runId={runId} />;
+  return <DesignPage initialRequest={initialRequest} runId={runId} />;
 }

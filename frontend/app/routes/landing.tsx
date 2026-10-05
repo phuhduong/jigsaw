@@ -1,9 +1,8 @@
-import type { Route } from "./+types/landing";
 import LandingPage from "../landing/index";
 
-export function meta({}: Route.MetaArgs) {
+export function meta() {
   return [
-    { title: "Jigsaw: Make your PCB click" },
+    { title: "Jigsaw · Device bill of materials" },
     {
       name: "description",
       content:
@@ -12,6 +11,6 @@ export function meta({}: Route.MetaArgs) {
   ];
 }
 
-export default function Landing() {
+export default function LandingRoute() {
   return <LandingPage />;
 }

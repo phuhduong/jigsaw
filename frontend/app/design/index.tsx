@@ -1,221 +1,751 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router";
-import { ArrowLeft, Loader2, Square, RefreshCw } from "lucide-react";
-import { Button } from "../components/ui/button";
-import { Textarea } from "../components/ui/textarea";
-import { Card } from "../components/ui/card";
+import { useEffect, useRef, useState } from "react";
+import type { FormEvent, KeyboardEvent } from "react";
+import { Link } from "react-router";
+import {
+  ArrowRight,
+  ArrowUpRight,
+  Check,
+  ChevronDown,
+  Download,
+  Loader2,
+  PencilLine,
+  RefreshCw,
+  Square,
+  X,
+} from "lucide-react";
+import AppHeader from "../components/AppHeader";
+import DeviceRequest from "../components/DeviceRequest";
 import { API_CONFIG } from "../services/api/config";
-import { getSavedRun, safeUrl, streamRun } from "../services/api/designRunApi";
-import type { DesignSnapshot, RunRequest } from "../services/api/designRunApi";
+import { getExportUrl } from "../services/api/designRunApi";
+import type {
+  DesignSnapshot,
+  InitialRequest,
+  RunRequest,
+} from "../services/api/designRunApi";
+import { useDesignRun } from "./useDesignRun";
+import SystemMap from "./SystemMap";
 import PartsList from "./PartsList";
+import ReviewPanel from "./ReviewPanel";
+import ComponentDetail from "./ComponentDetail";
+import { getCurrentFindings, isBlockingFinding } from "./reportHelpers";
+import { getRunStopMessage } from "./runFeedback";
+import PartIllustration from "./PartIllustration";
 
-const compatibilityLabels = { checked: "Compatibility checked", issues_found: "Compatibility issues found", incomplete: "Compatibility review incomplete" };
+const DESIGN_VIEWS = [
+  ["system", "Map"],
+  ["bom", "Parts"],
+] as const;
+type View = (typeof DESIGN_VIEWS)[number][0];
+const COMPATIBILITY_LABELS = {
+  checked: "Checks passed",
+  issues_found: "Checks failed",
+};
+const REPAIR_INSTRUCTION =
+  "Resolve the remaining functional or electrical compatibility failures. Preserve the original device requirements and already suitable components, and review the revised BOM.";
+const RETRY_INSTRUCTION =
+  "Finish selecting and reviewing this device. Preserve the original requirements and reuse suitable selected parts and available evidence.";
 
-export default function DesignInterface({ initialQuery = "", runId = null }: { initialQuery?: string; runId?: string | null }) {
-  const navigate = useNavigate();
-  const [snapshot, setSnapshot] = useState<DesignSnapshot | null>(null);
-  const [query, setQuery] = useState(initialQuery);
-  const [modification, setModification] = useState("");
+function ClarificationForm({
+  snapshot,
+  disabled,
+  onRun,
+}: {
+  snapshot: DesignSnapshot;
+  disabled: boolean;
+  onRun: (request: RunRequest) => Promise<void>;
+}) {
   const [answers, setAnswers] = useState<Record<string, string>>({});
-  const [busy, setBusy] = useState(false);
-  const [progress, setProgress] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const controller = useRef<AbortController | null>(null);
-  const generation = useRef(0);
-  const activeRunId = useRef<string | null>(null);
+  const hasAnswers = snapshot.pending_questions.every((question) =>
+    answers[question.id]?.trim(),
+  );
 
-  const run = useCallback(async (request: RunRequest) => {
-    controller.current?.abort();
-    const current = new AbortController();
-    controller.current = current;
-    const ticket = ++generation.current;
-    activeRunId.current = null;
-    let sequence = 0;
-    setBusy(true);
-    setError(null);
-    setAnswers({});
-    setProgress("Starting design analysis…");
-    if ("query" in request) setSnapshot(null);
-    try {
-      await streamRun(request, event => {
-        if (generation.current !== ticket) return;
-        if (activeRunId.current && activeRunId.current !== event.run_id) return;
-        if (event.sequence <= sequence) return;
-        if (!activeRunId.current) {
-          activeRunId.current = event.run_id;
-          void navigate(`/design?run=${encodeURIComponent(event.run_id)}`, { replace: true, state: null });
-        }
-        sequence = event.sequence;
-        if (event.snapshot) setSnapshot(event.snapshot);
-        if (event.message || event.stage) setProgress(event.message || event.stage!.replaceAll("_", " "));
-        if (event.type === "error") setError(event.message || event.snapshot?.terminal_reason || "Analysis could not finish.");
-      }, current.signal);
-      if (generation.current === ticket) setModification("");
-    } catch (failure) {
-      if (generation.current === ticket) setError(failure instanceof Error ? failure.message : "Analysis could not finish.");
-    } finally {
-      if (generation.current === ticket) {
-        setBusy(false);
-        controller.current = null;
-      }
-    }
-  }, [navigate]);
-
-  const loadSaved = useCallback(async (id: string) => {
-    controller.current?.abort();
-    const current = new AbortController();
-    controller.current = current;
-    const ticket = ++generation.current;
-    activeRunId.current = id;
-    setBusy(true);
-    setError(null);
-    setProgress("Loading saved result…");
-    try {
-      const saved = await getSavedRun(id, current.signal);
-      if (generation.current !== ticket) return;
-      setSnapshot(saved);
-      setError(null);
-      setProgress(saved.lifecycle === "running" ? "The backend is finishing its current operation. Reload again shortly." : saved.terminal_reason);
-    } catch (failure) {
-      if (generation.current === ticket) setError(failure instanceof Error ? failure.message : "Could not retrieve the saved run.");
-    } finally {
-      if (generation.current === ticket) {
-        setBusy(false);
-        controller.current = null;
-      }
-    }
-  }, []);
-
-  useEffect(() => {
-    // Publishing the current stream's ID must not abort it or reload its snapshot.
-    if (runId && runId === activeRunId.current) return;
-    controller.current?.abort();
-    generation.current += 1;
-    activeRunId.current = null;
-    setSnapshot(null);
-    setAnswers({});
-    setModification("");
-    setError(null);
-    setBusy(false);
-    setProgress("");
-    setQuery(initialQuery);
-    let cancelled = false;
-    // Defer starts so a development remount can cancel before making a request.
-    queueMicrotask(() => {
-      if (cancelled) return;
-      if (runId) void loadSaved(runId);
-      else if (initialQuery.trim()) void run({ query: initialQuery });
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (disabled || !hasAnswers) return;
+    void onRun({
+      base_run_id: snapshot.id,
+      answers: Object.fromEntries(
+        Object.entries(answers).map(([id, answer]) => [id, answer.trim()]),
+      ),
     });
-    return () => { cancelled = true; };
-  }, [initialQuery, runId, run, loadSaved]);
-
-  useEffect(() => () => {
-    controller.current?.abort();
-    generation.current += 1;
-  }, []);
-
-  const reload = () => {
-    const id = activeRunId.current ?? runId;
-    if (id) void loadSaved(id);
-  };
-
-  const canRefine = snapshot && snapshot.lifecycle !== "running" && !busy;
-  const findings = snapshot?.findings.filter(item => item.revision === snapshot.revision) ?? [];
-  const outstanding = findings.filter(item => item.kind === "check" && ["fail", "unknown"].includes(item.status));
-  const lifecycle = snapshot?.lifecycle.replaceAll("_", " ");
+  }
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-white">
-      <header className="border-b border-zinc-800 bg-zinc-900/50 px-6 py-4 flex items-center justify-between gap-4">
-        <div className="flex items-center gap-4">
-          <Button variant="ghost" onClick={() => navigate("/")} className="text-zinc-400"><ArrowLeft className="w-4 h-4" /> Back</Button>
-          <h1 className="text-xl">Jigsaw <span className="text-zinc-500 text-sm ml-2">Pre-layout BOM</span></h1>
+    <section className="clarification" aria-labelledby="clarification-title">
+      <h2 id="clarification-title">Clarify your request</h2>
+      <form onSubmit={handleSubmit}>
+        {snapshot.pending_questions.map((question) => (
+          <label key={question.id}>
+            {question.question}
+            {question.guidance && <span>{question.guidance}</span>}
+            <textarea
+              value={answers[question.id] ?? ""}
+              onChange={(event) =>
+                setAnswers((previous) => ({
+                  ...previous,
+                  [question.id]: event.target.value,
+                }))
+              }
+              maxLength={10000}
+              required
+              disabled={disabled}
+              rows={2}
+            />
+          </label>
+        ))}
+        <button
+          type="submit"
+          className="button button-primary"
+          disabled={
+            disabled || !snapshot.pending_questions.length || !hasAnswers
+          }
+        >
+          Continue with answers <ArrowRight size={15} aria-hidden="true" />
+        </button>
+      </form>
+    </section>
+  );
+}
+
+function RefinementForm({
+  snapshot,
+  disabled,
+  active,
+  onRun,
+  onClose,
+}: {
+  snapshot: DesignSnapshot;
+  disabled: boolean;
+  active: boolean;
+  onRun: (request: RunRequest) => Promise<void>;
+  onClose: () => void;
+}) {
+  const [modification, setModification] = useState("");
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const trimmedModification = modification.trim();
+  useEffect(() => {
+    if (active) inputRef.current?.focus();
+  }, [active]);
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (disabled || !trimmedModification) return;
+    void onRun({ base_run_id: snapshot.id, modification: trimmedModification });
+  }
+
+  return (
+    <section className="refinement" aria-labelledby="refinement-title">
+      <div className="form-heading">
+        <h2 id="refinement-title">What should change?</h2>
+        <button
+          type="button"
+          className="button button-quiet"
+          aria-label="Close changes"
+          onClick={onClose}
+        >
+          <X size={18} />
+        </button>
+      </div>
+      <form onSubmit={handleSubmit}>
+        <label htmlFor="modification" className="sr-only">
+          Changes to the device
+        </label>
+        <textarea
+          id="modification"
+          ref={inputRef}
+          value={modification}
+          onChange={(event) => setModification(event.target.value)}
+          maxLength={10000}
+          disabled={disabled}
+          placeholder="Add another sensor, change the power source…"
+          rows={2}
+        />
+        <div className="refinement-actions">
+          <button
+            type="submit"
+            className="button button-primary"
+            disabled={disabled || !trimmedModification}
+          >
+            Update & recheck <ArrowUpRight size={16} aria-hidden="true" />
+          </button>
         </div>
-        {snapshot && <span className="text-xs text-zinc-500">Revision {snapshot.revision} · {lifecycle}</span>}
-      </header>
+      </form>
+    </section>
+  );
+}
 
-      <p className="px-6 py-3 bg-amber-950/50 text-amber-300 text-sm">Experimental: compatibility checks apply to the recorded parts and assumptions, not a tested PCB. Review the evidence and open issues before ordering parts.</p>
+function GenerationProgress({
+  stage,
+  onStop,
+}: {
+  stage?: string;
+  onStop: () => void;
+}) {
+  let activeStep = 0;
+  if (stage === "select" || stage === "sourcing") activeStep = 1;
+  else if (stage === "evidence") activeStep = 2;
+  else if (stage === "review" || stage === "correct") activeStep = 3;
+  const label =
+    stage === "correct"
+      ? "Adjusting the parts to resolve issues…"
+      : [
+          "Planning your device…",
+          "Finding components…",
+          "Reading datasheets…",
+          "Checking compatibility…",
+        ][activeStep];
+  return (
+    <section className="activity-panel" aria-label="Generation progress">
+      <div className="activity-current" role="status">
+        <Loader2 size={17} className="spin" aria-hidden="true" />
+        {label}
+      </div>
+      <ol className="activity-steps" aria-label="Current stage">
+        {["Plan", "Parts", "Sources", "Review"].map((name, index) => (
+          <li
+            key={name}
+            aria-current={index === activeStep ? "step" : undefined}
+          >
+            <span>{index + 1}</span>
+            {name}
+          </li>
+        ))}
+      </ol>
+      <button
+        type="button"
+        className="button button-small button-quiet"
+        onClick={onStop}
+      >
+        <Square size={12} aria-hidden="true" />
+        Stop
+      </button>
+    </section>
+  );
+}
 
-      {API_CONFIG.useMock && <div className="px-6 py-3 bg-amber-950/50 text-amber-300 text-sm">Demo mode is enabled. Live analysis is disabled.</div>}
+export default function DesignPage({
+  initialRequest,
+  runId = null,
+}: {
+  initialRequest?: InitialRequest;
+  runId?: string | null;
+}) {
+  const {
+    snapshot,
+    busy,
+    streaming,
+    loading,
+    stage,
+    error,
+    failedRequest,
+    run,
+    reload,
+    stop,
+  } = useDesignRun({ initialRequest, runId });
+  const [view, setView] = useState<View>("system");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [isRefining, setIsRefining] = useState(false);
+  const notesRef = useRef<HTMLDetailsElement>(null);
+  const exportMenuRef = useRef<HTMLDetailsElement>(null);
+  const changeButtonRef = useRef<HTMLButtonElement>(null);
+  const [lastRequest, setLastRequest] = useState(initialRequest);
+  const inspectorRef = useRef<HTMLDivElement>(null);
+  const shouldRevealSelectionRef = useRef(false);
+  const selectionTriggerRef = useRef<HTMLElement | null>(null);
+  const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const selectedComponentId = snapshot?.components.some(
+    (part) => part.id === selectedId,
+  )
+    ? selectedId
+    : null;
+  const findings = snapshot ? getCurrentFindings(snapshot) : [];
+  const blockingFindings =
+    snapshot?.lifecycle === "running" ? [] : findings.filter(isBlockingFinding);
+  const disabled =
+    busy || snapshot?.lifecycle === "running" || API_CONFIG.generationDisabled;
+  const isReviewing = streaming || snapshot?.lifecycle === "running";
+  const stopMessage = snapshot ? getRunStopMessage(snapshot) : null;
+  const hasFailures =
+    !isReviewing &&
+    (snapshot?.compatibility === "issues_found" || blockingFindings.length > 0);
+  const canRetry =
+    snapshot !== null && !disabled && snapshot.lifecycle !== "needs_input";
 
-      <main className="max-w-[1500px] mx-auto grid lg:grid-cols-[minmax(0,1fr)_420px]">
-        <div className="p-6 space-y-6 min-w-0">
-          <Card className="bg-zinc-900/50 border-zinc-800 p-5">
-            <h2 className="text-lg mb-3">{snapshot ? "Device request" : "Describe your device"}</h2>
-            {snapshot ? <p className="text-zinc-300 whitespace-pre-wrap">{snapshot.original_request}</p> : <form onSubmit={event => { event.preventDefault(); void run({ query: query.trim() }); }}>
-              <Textarea aria-label="Device requirements" value={query} onChange={event => setQuery(event.target.value)} maxLength={10000} placeholder="A temperature and humidity sensor with WiFi and Bluetooth, powered by USB-C…" className="bg-zinc-950 border-zinc-700 min-h-28" disabled={busy} />
-              <Button type="submit" disabled={busy || !query.trim() || API_CONFIG.useMock} className="mt-3 bg-emerald-600 hover:bg-emerald-500">Generate BOM</Button>
-            </form>}
-            {snapshot?.summary && <p className="text-sm text-zinc-400 mt-4">{snapshot.summary}</p>}
-          </Card>
+  const handleRetry = () => {
+    if (failedRequest && !busy) {
+      void run(failedRequest);
+      return;
+    }
+    if (!snapshot || !canRetry) return;
+    // A planning failure has not incorporated the requested change yet. Once
+    // planning succeeds, repeat the checks against the updated requirements.
+    const modification =
+      snapshot.stage === "plan" && snapshot.modification
+        ? snapshot.modification
+        : hasFailures
+          ? REPAIR_INSTRUCTION
+          : RETRY_INSTRUCTION;
+    void run({ base_run_id: snapshot.id, modification });
+  };
 
-          <div aria-live="polite" className="space-y-3">
-            {busy && <div className="flex items-center justify-between gap-4 text-sm text-emerald-400"><span className="flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin shrink-0" />{progress || "Analysis in progress…"}</span><Button variant="outline" size="sm" onClick={() => controller.current?.abort()} className="border-zinc-700 text-zinc-300"><Square className="w-3 h-3" /> Stop</Button></div>}
-            {error && <p role="alert" className="border border-red-900 bg-red-950/30 text-red-300 p-4 rounded-lg text-sm">{error}</p>}
-            {!busy && !snapshot && runId && <Button variant="ghost" size="sm" onClick={reload} className="text-zinc-400"><RefreshCw className="w-3 h-3" /> Retry saved result</Button>}
-            {!busy && snapshot && <div className="flex flex-wrap items-center gap-3">
-              <span className={`text-sm ${snapshot.compatibility === "checked" && !error ? "text-emerald-400" : "text-amber-400"}`}>{error ? "Request did not finish successfully — see error above" : compatibilityLabels[snapshot.compatibility]}</span>
-              <Button variant="ghost" size="sm" onClick={() => void reload()} className="text-zinc-400"><RefreshCw className="w-3 h-3" /> Reload saved result</Button>
-            </div>}
-            {!busy && snapshot?.terminal_reason && <p className="text-sm text-zinc-400">{snapshot.terminal_reason}</p>}
-            {!busy && progress && snapshot?.lifecycle === "running" && <p className="text-sm text-zinc-400">{progress}</p>}
+  useEffect(() => {
+    setSelectedId(null);
+    setIsRefining(false);
+  }, [runId]);
+  useEffect(() => {
+    const handlePointerDown = (event: PointerEvent) => {
+      if (
+        exportMenuRef.current &&
+        !exportMenuRef.current.contains(event.target as Node)
+      )
+        exportMenuRef.current.open = false;
+    };
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, []);
+  const revealInspector = () => {
+    inspectorRef.current?.focus({ preventScroll: true });
+    const rect = inspectorRef.current?.getBoundingClientRect();
+    if (
+      view === "bom" ||
+      window.matchMedia("(max-width: 1179px)").matches ||
+      (rect && (rect.bottom < 0 || rect.top > window.innerHeight))
+    )
+      inspectorRef.current?.scrollIntoView({
+        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+          ? "instant"
+          : "smooth",
+        block: "start",
+      });
+  };
+  useEffect(() => {
+    if (selectedComponentId && shouldRevealSelectionRef.current) {
+      shouldRevealSelectionRef.current = false;
+      revealInspector();
+    }
+  }, [selectedComponentId, view]);
+
+  const handleSelectComponent = (id: string) => {
+    selectionTriggerRef.current =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    if (selectedComponentId === id) {
+      revealInspector();
+      return;
+    }
+    shouldRevealSelectionRef.current = true;
+    setSelectedId(id);
+  };
+  const handleCloseInspector = () => {
+    setSelectedId(null);
+    if (selectionTriggerRef.current?.isConnected)
+      selectionTriggerRef.current.focus();
+    else tabRefs.current[view === "bom" ? 1 : 0]?.focus();
+  };
+  const handleShowNotes = () => {
+    if (notesRef.current) {
+      notesRef.current.open = true;
+      notesRef.current.querySelector("summary")?.focus({ preventScroll: true });
+      notesRef.current.scrollIntoView({
+        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+          ? "instant"
+          : "smooth",
+        block: "start",
+      });
+    }
+  };
+  const handleCloseRefinement = () => {
+    setIsRefining(false);
+    changeButtonRef.current?.focus();
+  };
+  const handleInspectorKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === "Escape") handleCloseInspector();
+  };
+  const handleExportKeyDown = (event: KeyboardEvent<HTMLDetailsElement>) => {
+    if (event.key === "Escape" && exportMenuRef.current) {
+      exportMenuRef.current.open = false;
+      exportMenuRef.current.querySelector("summary")?.focus();
+    }
+  };
+  const handleTabKeyDown = (
+    event: KeyboardEvent<HTMLButtonElement>,
+    index: number,
+  ) => {
+    let nextIndex: number;
+    switch (event.key) {
+      case "ArrowRight":
+        nextIndex = (index + 1) % DESIGN_VIEWS.length;
+        break;
+      case "ArrowLeft":
+        nextIndex = (index - 1 + DESIGN_VIEWS.length) % DESIGN_VIEWS.length;
+        break;
+      case "Home":
+        nextIndex = 0;
+        break;
+      case "End":
+        nextIndex = DESIGN_VIEWS.length - 1;
+        break;
+      default:
+        return;
+    }
+    event.preventDefault();
+    setView(DESIGN_VIEWS[nextIndex][0]);
+    tabRefs.current[nextIndex]?.focus();
+  };
+  const hasWorkspace = Boolean(snapshot || runId || busy);
+  const isRestoring = loading || Boolean(runId && !streaming);
+
+  return (
+    <div className="app-shell">
+      <AppHeader workspace />
+      {!hasWorkspace ? (
+        <main id="main-content">
+          {error && (
+            <div className="request-error notice notice-error" role="alert">
+              {error}
+            </div>
+          )}
+          <DeviceRequest
+            initialRequest={lastRequest ?? initialRequest}
+            onSubmit={(request) => {
+              setLastRequest(request);
+              void run(request);
+            }}
+          />
+        </main>
+      ) : (
+        <main id="main-content" className="workspace">
+          {API_CONFIG.generationDisabled && (
+            <p className="notice notice-info">
+              Generation is disabled in this preview.
+            </p>
+          )}
+          <header className="workspace-header">
+            <div className="workspace-heading">
+              <h1>
+                {snapshot?.original_request ||
+                  (error
+                    ? "Result unavailable"
+                    : isRestoring
+                      ? "Loading result…"
+                      : lastRequest?.query ||
+                        initialRequest?.query ||
+                        "Selecting components…")}
+              </h1>
+              {snapshot?.modification &&
+                ![REPAIR_INSTRUCTION, RETRY_INSTRUCTION].includes(
+                  snapshot.modification,
+                ) && (
+                  <p className="latest-change">
+                    <span>Latest change</span>
+                    {snapshot.modification}
+                  </p>
+                )}
+            </div>
+            {snapshot && (
+              <div className="workspace-tools">
+                <button
+                  ref={changeButtonRef}
+                  className={`button button-small button-quiet${isRefining ? " is-active" : ""}`}
+                  type="button"
+                  onClick={() => setIsRefining(!isRefining)}
+                  disabled={disabled || snapshot.lifecycle === "needs_input"}
+                  aria-expanded={isRefining}
+                  aria-controls="refine-device"
+                >
+                  <PencilLine size={15} aria-hidden="true" />
+                  Change
+                </button>
+                <details
+                  className="workspace-menu"
+                  ref={exportMenuRef}
+                  onKeyDown={handleExportKeyDown}
+                >
+                  <summary>
+                    <Download size={15} aria-hidden="true" />
+                    Export
+                    <ChevronDown size={12} aria-hidden="true" />
+                  </summary>
+                  <div>
+                    <a href={getExportUrl(snapshot.id, "csv")}>
+                      Parts CSV <ArrowUpRight size={14} aria-hidden="true" />
+                    </a>
+                    <a href={getExportUrl(snapshot.id, "json")}>
+                      Full JSON <ArrowUpRight size={14} aria-hidden="true" />
+                    </a>
+                  </div>
+                </details>
+              </div>
+            )}
+          </header>
+          {snapshot && (
+            <div id="refine-device" hidden={!isRefining}>
+              <RefinementForm
+                key={snapshot.id}
+                snapshot={snapshot}
+                disabled={disabled}
+                active={isRefining}
+                onRun={run}
+                onClose={handleCloseRefinement}
+              />
+            </div>
+          )}
+          <div className="workspace-messages">
+            {!streaming && (error || stopMessage || hasFailures) && (
+              <section
+                className={`result-notice${hasFailures ? " result-needs-attention" : ""}`}
+                role={error ? "alert" : "status"}
+                aria-label={
+                  hasFailures ? "Compatibility issues" : "Generation status"
+                }
+              >
+                <div>
+                  <h2>
+                    {hasFailures
+                      ? "Compatibility issues remain"
+                      : error && !error.startsWith("Generation stopped")
+                        ? "Couldn’t complete the request"
+                        : "Generation stopped"}
+                  </h2>
+                  <p>
+                    {error ||
+                      stopMessage ||
+                      "The review found compatibility issues in this selection."}
+                  </p>
+                  {failedRequest && "base_run_id" in failedRequest && (
+                    <p>Showing your previous result.</p>
+                  )}
+                </div>
+                <div className="result-actions">
+                  {hasFailures && blockingFindings.length > 0 && (
+                    <button
+                      type="button"
+                      className="button button-quiet"
+                      onClick={handleShowNotes}
+                    >
+                      View issues <ArrowRight size={15} aria-hidden="true" />
+                    </button>
+                  )}
+                  {error && runId && !busy && (
+                    <button type="button" className="button" onClick={reload}>
+                      <RefreshCw size={14} aria-hidden="true" />
+                      Reload saved result
+                    </button>
+                  )}
+                  {(canRetry || (failedRequest && !busy)) && (
+                    <button
+                      type="button"
+                      className="button button-primary"
+                      onClick={handleRetry}
+                    >
+                      <RefreshCw size={14} aria-hidden="true" />
+                      {hasFailures && !failedRequest
+                        ? "Try to fix issues"
+                        : "Try again"}
+                    </button>
+                  )}
+                </div>
+              </section>
+            )}
+            {!error &&
+              snapshot?.lifecycle === "running" &&
+              !streaming &&
+              !loading && (
+                <div className="notice notice-info notice-row">
+                  <p>
+                    This design hasn’t finished. Check for its latest saved
+                    result.
+                  </p>
+                  <button
+                    className="button button-small"
+                    type="button"
+                    onClick={reload}
+                  >
+                    Check progress
+                  </button>
+                </div>
+              )}
           </div>
-
-          {snapshot?.lifecycle === "needs_input" && <Card className="bg-zinc-900/50 border-amber-900 p-5">
-            <h2 className="text-lg mb-4">A little more detail is needed</h2>
-            <form onSubmit={event => { event.preventDefault(); void run({ base_run_id: snapshot.id, answers }); }} className="space-y-4">
-              {snapshot.pending_questions.map(question => <label key={question.id} className="block text-sm text-zinc-300">
-                {question.question}{question.guidance && <span className="block text-xs text-zinc-500 mt-1">{question.guidance}</span>}
-                <Textarea value={answers[question.id] ?? ""} onChange={event => setAnswers(previous => ({ ...previous, [question.id]: event.target.value }))} className="mt-2 bg-zinc-950 border-zinc-700" required disabled={busy} maxLength={10000} />
-              </label>)}
-              <Button type="submit" disabled={busy || !snapshot.pending_questions.every(question => answers[question.id]?.trim())} className="bg-emerald-600 hover:bg-emerald-500">Continue design</Button>
-            </form>
-          </Card>}
-
-          {snapshot && <>
-            {snapshot.assumptions.length > 0 && <Card className="bg-zinc-900/50 border-zinc-800 p-5">
-              <h2 className="text-lg mb-3">Design assumptions</h2>
-              <ul className="list-disc pl-5 space-y-2 text-sm text-zinc-400">{snapshot.assumptions.map(item => <li key={item.id}>{item.description}</li>)}</ul>
-            </Card>}
-
-            {snapshot.components.some(item => !item.product) && <Card className="bg-zinc-900/50 border-amber-900 p-5">
-              <h2 className="text-lg mb-3">Unresolved selections</h2>
-              {snapshot.components.filter(item => !item.product).map(item => <p key={item.id} className="text-sm text-amber-300 mt-2">{item.id} · {item.name}: {item.selection_error || "Selection pending"}</p>)}
-            </Card>}
-
-            <Card className="bg-zinc-900/50 border-zinc-800 p-5">
-              <h2 className="text-lg mb-2">Compatibility review</h2>
-              <p className="text-xs text-zinc-500 mb-4">Source-assisted model review and explicit code checks. {outstanding.length} unresolved check(s). This is a pre-layout review, not a finished schematic or tested PCB.</p>
-              {!findings.length && <p className="text-sm text-zinc-500">No review results yet.</p>}
-              <div className="space-y-3">{findings.map(finding => <details key={finding.id} open={finding.kind === "check" && ["fail", "unknown"].includes(finding.status)} className="border border-zinc-800 rounded-md p-3">
-                <summary className="cursor-pointer text-sm"><span className={finding.status === "pass" ? "text-emerald-400" : finding.status === "fail" ? "text-red-300" : "text-amber-300"}>{finding.status.replaceAll("_", " ")}</span><span className="text-zinc-300 ml-2">{finding.area} · {finding.kind === "guidance" ? "guidance" : finding.method === "code" ? "code check" : "model review"}</span></summary>
-                <p className="text-sm text-zinc-400 mt-3">{finding.explanation}</p>
-                {finding.remedy && <p className="text-sm text-zinc-300 mt-2">{finding.remedy}</p>}
-                <div className="flex flex-wrap gap-3 text-xs text-emerald-400 mt-3">{finding.evidence_ids.map(id => {
-                  const evidence = snapshot.evidence.find(item => item.id === id);
-                  const document = snapshot.documents.find(item => item.document_id === evidence?.document_id);
-                  const url = safeUrl(document?.url);
-                  return url && evidence ? <a key={id} href={`${url.split("#")[0]}#page=${evidence.page}`} target="_blank" rel="noopener noreferrer" title={evidence.fact}>{document?.title || id} · p. {evidence.page}</a> : <span key={id} className="text-zinc-500">{id}</span>;
-                })}</div>
-              </details>)}</div>
-            </Card>
-
-            {snapshot.configuration_notes.length > 0 && <details className="border border-zinc-800 bg-zinc-900/30 rounded-xl p-5">
-              <summary className="cursor-pointer">Configuration and layout notes</summary>
-              <ul className="list-disc pl-5 space-y-2 text-sm text-zinc-400 mt-4">{snapshot.configuration_notes.map((note, index) => <li key={index}>{note}</li>)}</ul>
-            </details>}
-
-            {snapshot.lifecycle !== "needs_input" && <Card className="bg-zinc-900/50 border-zinc-800 p-5">
-              <h2 className="text-lg mb-3">Refine this design</h2>
-              <form onSubmit={event => { event.preventDefault(); void run({ base_run_id: snapshot.id, modification: modification.trim() }); }}>
-                <Textarea aria-label="Design modification" value={modification} onChange={event => setModification(event.target.value)} disabled={!canRefine} maxLength={10000} placeholder="Add a second sensor, change the supply, or adjust a requirement…" className="bg-zinc-950 border-zinc-700" />
-                <Button type="submit" disabled={!canRefine || !modification.trim()} className="mt-3 bg-emerald-600 hover:bg-emerald-500">Update and recheck</Button>
-              </form>
-            </Card>}
-          </>}
-        </div>
-        <aside className="border-l border-zinc-800 bg-zinc-900/30 min-w-0"><PartsList snapshot={snapshot} /></aside>
-      </main>
+          {streaming && (
+            <GenerationProgress
+              stage={stage || snapshot?.stage}
+              onStop={stop}
+            />
+          )}
+          {snapshot?.lifecycle === "needs_input" && (
+            <ClarificationForm
+              key={snapshot.id}
+              snapshot={snapshot}
+              disabled={disabled}
+              onRun={run}
+            />
+          )}
+          {!snapshot ? (
+            <>
+              {!error && (
+                <section className="loading-workspace">
+                  <div className="loading-part">
+                    <PartIllustration role="controller" />
+                  </div>
+                  <p>
+                    {isRestoring
+                      ? "Opening your saved design…"
+                      : "The component map will take shape here."}
+                  </p>
+                </section>
+              )}
+              {error && runId && (
+                <div className="empty-state">
+                  <Link to="/" className="button">
+                    New device <ArrowUpRight size={14} aria-hidden="true" />
+                  </Link>
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              <div className="workbench">
+                <div className="workspace-navigation">
+                  <div
+                    className="workspace-tabs"
+                    role="tablist"
+                    aria-label="Design views"
+                  >
+                    {DESIGN_VIEWS.map(([id, label], index) => (
+                      <button
+                        key={id}
+                        type="button"
+                        ref={(element) => {
+                          tabRefs.current[index] = element;
+                        }}
+                        id={`tab-${id}`}
+                        role="tab"
+                        aria-selected={view === id}
+                        aria-controls={`view-${id}`}
+                        tabIndex={view === id ? 0 : -1}
+                        onClick={() => setView(id)}
+                        onKeyDown={(event) => handleTabKeyDown(event, index)}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  <span
+                    role="status"
+                    className={`review-status ${!isReviewing && snapshot.compatibility ? `status-${snapshot.compatibility}` : ""}`}
+                    title={
+                      !isReviewing && snapshot.compatibility === "checked"
+                        ? "No explicit functional or electrical error was identified by the performed checks."
+                        : undefined
+                    }
+                  >
+                    {!isReviewing && snapshot.compatibility === "checked" && (
+                      <Check size={14} aria-hidden="true" />
+                    )}
+                    {isReviewing
+                      ? error
+                        ? "Not finished"
+                        : "Review in progress"
+                      : snapshot.compatibility
+                        ? COMPATIBILITY_LABELS[snapshot.compatibility]
+                        : "No review result"}
+                  </span>
+                </div>
+                <section
+                  id="view-system"
+                  role="tabpanel"
+                  aria-labelledby="tab-system"
+                  hidden={view !== "system"}
+                  className="workspace-view"
+                >
+                  {view === "system" && (
+                    <div
+                      className={`system-layout${selectedComponentId ? " has-selection" : ""}`}
+                    >
+                      <div className="system-main">
+                        <SystemMap
+                          snapshot={snapshot}
+                          selectedId={selectedComponentId}
+                          onSelect={handleSelectComponent}
+                        />
+                      </div>
+                      {selectedComponentId && (
+                        <div
+                          className="selection-inspector"
+                          ref={inspectorRef}
+                          tabIndex={-1}
+                          aria-label="Component details"
+                          onKeyDown={handleInspectorKeyDown}
+                        >
+                          <ComponentDetail
+                            snapshot={snapshot}
+                            componentId={selectedComponentId}
+                            onSelect={handleSelectComponent}
+                            onClose={handleCloseInspector}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </section>
+                <section
+                  id="view-bom"
+                  role="tabpanel"
+                  aria-labelledby="tab-bom"
+                  hidden={view !== "bom"}
+                  className="workspace-view"
+                >
+                  {view === "bom" && (
+                    <>
+                      <PartsList
+                        snapshot={snapshot}
+                        selectedId={selectedComponentId}
+                        onSelect={handleSelectComponent}
+                      />
+                      {selectedComponentId && (
+                        <div
+                          className="bom-inspector"
+                          ref={inspectorRef}
+                          tabIndex={-1}
+                          aria-label="Component details"
+                          onKeyDown={handleInspectorKeyDown}
+                        >
+                          <ComponentDetail
+                            snapshot={snapshot}
+                            componentId={selectedComponentId}
+                            onSelect={handleSelectComponent}
+                            onClose={handleCloseInspector}
+                          />
+                        </div>
+                      )}
+                    </>
+                  )}
+                </section>
+              </div>
+              {(snapshot.assumptions.length > 0 ||
+                snapshot.configuration_notes.length > 0 ||
+                blockingFindings.length > 0 ||
+                snapshot.support_needs.length > 0 ||
+                snapshot.source_support_needs.length > 0) && (
+                <details
+                  className="build-notes"
+                  ref={notesRef}
+                  open={blockingFindings.length > 0 || undefined}
+                >
+                  <summary>
+                    Build notes <ChevronDown size={15} aria-hidden="true" />
+                  </summary>
+                  <ReviewPanel
+                    snapshot={snapshot}
+                    onSelect={handleSelectComponent}
+                  />
+                </details>
+              )}
+            </>
+          )}
+        </main>
+      )}
     </div>
   );
 }

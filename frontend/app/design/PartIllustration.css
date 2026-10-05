@@ -1,0 +1,93 @@
+.technical-part {
+  --technical-accent: #95949b;
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  fill: none;
+  stroke: #62696c;
+  stroke-width: 0.85;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.technical-part.part-illustration-controller {
+  --technical-accent: #948aaa;
+}
+.technical-part.part-illustration-sensor {
+  --technical-accent: #80a0b4;
+}
+.technical-part.part-illustration-power {
+  --technical-accent: #81a08b;
+}
+.technical-top {
+  fill: #fdfdfc;
+}
+.technical-front {
+  fill: #f0f1f0;
+}
+.technical-side {
+  fill: #e5e7e7;
+}
+.technical-top,
+.technical-front,
+.technical-side,
+.technical-socket {
+  vector-effect: non-scaling-stroke;
+  stroke-width: 0.95;
+}
+.technical-board .technical-top {
+  fill: #fafbf9;
+  stroke: #78817e;
+}
+.technical-board .technical-front {
+  fill: #edf0ed;
+  stroke: #78817e;
+}
+.technical-board .technical-side {
+  fill: #e3e7e4;
+  stroke: #78817e;
+}
+.technical-trace {
+  stroke: #b5bdbd;
+  stroke-width: 0.8;
+}
+.technical-pad {
+  stroke: #a0a8a6;
+  stroke-width: 2.6;
+  stroke-linecap: butt;
+}
+.technical-terminal {
+  stroke: #aab1b0;
+  stroke-width: 3;
+  stroke-linecap: butt;
+}
+.technical-accent-line {
+  stroke: var(--technical-accent);
+  stroke-width: 1.3;
+}
+.technical-accent-fill {
+  fill: var(--technical-accent);
+  stroke: none;
+}
+.technical-seam {
+  stroke: #a9aeb0;
+  stroke-width: 0.65;
+}
+.technical-detail {
+  stroke: #a3a9ab;
+  stroke-width: 0.8;
+}
+.technical-vent {
+  stroke: #747d80;
+  stroke-width: 1.3;
+}
+.technical-socket {
+  fill: #eef0ef;
+  stroke: #6e777b;
+  stroke-width: 0.9;
+}
+.technical-tongue {
+  fill: #c5cccb;
+  stroke: #858e90;
+  stroke-width: 0.65;
+}
