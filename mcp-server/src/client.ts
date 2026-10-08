@@ -1,9 +1,55 @@
-/** DigiKey OAuth and catalog lookup. Engineering interpretation stays in Python. */
-import axios, { AxiosInstance } from 'axios';
-import {
-  DigiKeyDetailsResponse, DigiKeyLocale, DigiKeyProduct, DigiKeySearchResponse,
-  DigiKeyTokenResponse, SupplierProduct,
-} from './types.js';
+interface SupplierOffer {
+  sku: string;
+  url: string | null;
+  currency: string | null;
+  region: string | null;
+  packaging: string | null;
+  stock: number | null;
+  moq: number | null;
+  order_multiple: number | null;
+  standard_package: number | null;
+  price_breaks: Array<{ quantity: number; unit_price: number }>;
+  retrieved_at: string;
+}
+
+interface SupplierProduct {
+  manufacturer: string;
+  mpn: string;
+  package: string;
+  description: string;
+  datasheet_url: string | null;
+  product_url: string | null;
+  parameters: Array<{ name: string; value: string }>;
+  offers: SupplierOffer[];
+  retrieved_at: string;
+}
+
+interface DigiKeyLocale {
+  Site?: string;
+  Currency?: string;
+}
+
+interface DigiKeyVariation {
+  DigiKeyProductNumber?: string;
+  ProductUrl?: string;
+  PackageType?: { Name?: string };
+  QuantityAvailableforPackageType?: number | null;
+  MinimumOrderQuantity?: number | null;
+  OrderMultiple?: number | null;
+  StandardPackage?: number | null;
+  StandardPricing?: Array<{ BreakQuantity: number; UnitPrice?: number | string | null }>;
+  MarketPlace?: boolean;
+}
+
+interface DigiKeyProduct {
+  ManufacturerProductNumber?: string;
+  Manufacturer?: { Name?: string };
+  Description?: { ProductDescription?: string; DetailedDescription?: string };
+  DatasheetUrl?: string;
+  ProductUrl?: string;
+  Parameters?: Array<{ ParameterText: string; ValueText: string }>;
+  ProductVariations?: DigiKeyVariation[];
+}
 
 export class SupplierError extends Error {
   constructor(message: string, public statusCode?: number, public retryAfter?: string) {
@@ -12,7 +58,7 @@ export class SupplierError extends Error {
   }
 }
 
-export interface LookupOptions {
+interface LookupOptions {
   region?: string;
   currency?: string;
   /** Absolute deadline includes the caller's MCP initialization and transport time. */
@@ -20,14 +66,14 @@ export interface LookupOptions {
 }
 
 function numberOrNull(value: unknown): number | null {
-  if (value === null || value === undefined || value === '') return null;
-  const number = typeof value === 'number' ? value : Number(value);
+  if (typeof value !== 'number' && (typeof value !== 'string' || value.trim() === '')) return null;
+  const number = Number(value);
   return Number.isFinite(number) && number >= 0 ? number : null;
 }
 
-function positiveInteger(value: unknown): number | null {
+function integerOrNull(value: unknown, minimum = 0): number | null {
   const number = numberOrNull(value);
-  return number !== null && Number.isInteger(number) && number > 0 ? number : null;
+  return number !== null && Number.isSafeInteger(number) && number >= minimum ? number : null;
 }
 
 function providerUrl(value: string | undefined): string | null {
@@ -39,7 +85,6 @@ function providerUrl(value: string | undefined): string | null {
   }
 }
 
-/** Pure normalization shared by keyword search and ProductDetails. */
 export function mapProduct(
   product: DigiKeyProduct,
   locale: DigiKeyLocale = {},
@@ -67,14 +112,17 @@ export function mapProduct(
         currency: locale.Currency ?? null,
         region: locale.Site ?? null,
         packaging: v.PackageType?.Name ?? null,
-        stock: numberOrNull(v.QuantityAvailableforPackageType),
-        moq: positiveInteger(v.MinimumOrderQuantity),
+        stock: integerOrNull(v.QuantityAvailableforPackageType),
+        moq: integerOrNull(v.MinimumOrderQuantity, 1),
         // StandardPackage is the manufacturer's pack size, not an order multiple.
-        order_multiple: positiveInteger(v.OrderMultiple),
-        standard_package: positiveInteger(v.StandardPackage),
+        order_multiple: integerOrNull(v.OrderMultiple, 1),
+        standard_package: integerOrNull(v.StandardPackage, 1),
         price_breaks: (v.StandardPricing ?? [])
-          .filter(p => positiveInteger(p.BreakQuantity) !== null && numberOrNull(p.UnitPrice) !== null)
-          .map(p => ({ quantity: p.BreakQuantity, unit_price: numberOrNull(p.UnitPrice)! }))
+          .flatMap(p => {
+            const quantity = integerOrNull(p.BreakQuantity, 1);
+            const unitPrice = numberOrNull(p.UnitPrice);
+            return quantity === null || unitPrice === null ? [] : [{ quantity, unit_price: unitPrice }];
+          })
           .sort((a, b) => a.quantity - b.quantity),
         retrieved_at: retrievedAt,
       })),
@@ -89,21 +137,50 @@ export class DigiKeyClient {
   constructor(
     private clientId: string,
     private clientSecret: string,
-    private http: AxiosInstance = axios.create(),
-  ) {
-    if (!clientId || !clientSecret) throw new SupplierError('DigiKey credentials are required');
+    private http: typeof fetch = fetch,
+  ) {}
+
+  private async request<T>(url: string, options: RequestInit): Promise<T> {
+    let response: Response;
+    try {
+      response = await this.http(url, options);
+    } catch {
+      throw new SupplierError('Could not reach DigiKey');
+    }
+    if (!response.ok) {
+      if (response.status === 401) this.accessToken = null;
+      // Release the connection without replacing the provider's HTTP failure.
+      await response.body?.cancel().catch(() => {});
+      throw new SupplierError(
+        `DigiKey request failed (HTTP ${response.status})`,
+        response.status, response.headers.get('retry-after') ?? undefined,
+      );
+    }
+    try {
+      const data: unknown = await response.json();
+      if (data === null || typeof data !== 'object' || Array.isArray(data)) {
+        throw new Error('Expected an object');
+      }
+      return data as T;
+    } catch {
+      throw new SupplierError('Invalid DigiKey response');
+    }
   }
 
   private async getAccessToken(signal: AbortSignal): Promise<string> {
     if (this.accessToken && Date.now() < this.tokenExpiresAt - 30000) return this.accessToken;
-    const response = await this.http.post<DigiKeyTokenResponse>(
-      'https://api.digikey.com/v1/oauth2/token',
-      new URLSearchParams({ grant_type: 'client_credentials', client_id: this.clientId, client_secret: this.clientSecret }),
-      { signal, headers: { 'Content-Type': 'application/x-www-form-urlencoded' } },
-    );
-    if (!response.data.access_token) throw new SupplierError('DigiKey returned no access token');
-    this.accessToken = response.data.access_token;
-    this.tokenExpiresAt = Date.now() + response.data.expires_in * 1000;
+    const response = await this.request<{ access_token: string; expires_in: number }>(
+      'https://api.digikey.com/v1/oauth2/token', {
+        method: 'POST', signal,
+        body: new URLSearchParams({ grant_type: 'client_credentials', client_id: this.clientId, client_secret: this.clientSecret }),
+        headers: { Accept: 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
+      });
+    if (typeof response.access_token !== 'string' || !response.access_token.trim()
+      || !Number.isFinite(response.expires_in) || response.expires_in <= 0) {
+      throw new SupplierError('Invalid DigiKey access token response');
+    }
+    this.accessToken = response.access_token;
+    this.tokenExpiresAt = Date.now() + response.expires_in * 1000;
     return this.accessToken;
   }
 
@@ -118,6 +195,7 @@ export class DigiKeyClient {
     try {
       const token = await this.getAccessToken(controller.signal);
       return await operation(controller.signal, {
+        Accept: 'application/json',
         Authorization: `Bearer ${token}`,
         'X-DIGIKEY-Client-Id': this.clientId,
         'X-DIGIKEY-Locale-Site': options.region ?? 'US',
@@ -126,14 +204,6 @@ export class DigiKeyClient {
       });
     } catch (error) {
       if (controller.signal.aborted) throw new SupplierError('Supplier operation deadline exceeded');
-      if (axios.isAxiosError(error)) {
-        const status = error.response?.status;
-        if (status === 401) this.accessToken = null;
-        throw new SupplierError(
-          status ? `DigiKey request failed (HTTP ${status})` : 'Could not reach DigiKey',
-          status, error.response?.headers['retry-after'],
-        );
-      }
       throw error;
     } finally {
       clearTimeout(timer);
@@ -142,23 +212,23 @@ export class DigiKeyClient {
 
   async searchComponents(query: string, limit = 3, options: LookupOptions = {}): Promise<SupplierProduct[]> {
     return this.lookup(options, async (signal, headers) => {
-      const response = await this.http.post<DigiKeySearchResponse>(
+      const response = await this.request<{ Products: DigiKeyProduct[]; SearchLocaleUsed?: DigiKeyLocale }>(
         'https://api.digikey.com/products/v4/search/keyword',
-        { Keywords: query, Limit: limit, Offset: 0, ExcludeMarketPlaceProducts: true },
-        { signal, headers },
+        { method: 'POST', signal, headers: { ...headers, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ Keywords: query, Limit: limit, Offset: 0, ExcludeMarketPlaceProducts: true }) },
       );
-      if (!Array.isArray(response.data.Products)) throw new SupplierError('Invalid DigiKey search response');
-      return response.data.Products.map(p => mapProduct(p, response.data.SearchLocaleUsed));
+      if (!Array.isArray(response.Products)) throw new SupplierError('Invalid DigiKey search response');
+      return response.Products.map(p => mapProduct(p, response.SearchLocaleUsed));
     });
   }
 
   async getProduct(productNumber: string, options: LookupOptions = {}): Promise<SupplierProduct> {
     return this.lookup(options, async (signal, headers) => {
-      const response = await this.http.get<DigiKeyDetailsResponse>(
+      const response = await this.request<{ Product: DigiKeyProduct; SearchLocaleUsed?: DigiKeyLocale }>(
         `https://api.digikey.com/products/v4/search/${encodeURIComponent(productNumber)}/productdetails`,
         { signal, headers },
       );
-      return mapProduct(response.data.Product, response.data.SearchLocaleUsed);
+      return mapProduct(response.Product, response.SearchLocaleUsed);
     });
   }
 }
