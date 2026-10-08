@@ -74,6 +74,30 @@ class SupplierTests(unittest.TestCase):
         self.assertEqual(caught.exception.retry_after, "20")
         self.assertEqual(len(fake.lookups), 1)
 
+    def test_expired_session_reconnects_without_extending_the_lookup_deadline(self):
+        class ExpiredSession(FakeMCP):
+            def __init__(self):
+                super().__init__()
+                self.deadlines = []
+
+            def post(self, url, *, json, headers, timeout):
+                if json["method"] == "tools/call":
+                    self.deadlines.append(json["params"]["arguments"]["deadline_ms"])
+                    if headers.get("mcp-session-id") == "expired":
+                        response = requests.Response()
+                        response.status_code = 404
+                        response._content = b"Session not found"
+                        return response
+                return super().post(url, json=json, headers=headers, timeout=timeout)
+
+        fake = ExpiredSession()
+        client = SupplierClient(http=fake)
+        client.session_id = "expired"
+        self.assertEqual(client.search("sensor")[0]["mpn"], "SENSOR-1")
+        self.assertEqual(client.session_id, "local-fake-session")
+        self.assertEqual(len(fake.deadlines), 2)
+        self.assertEqual(fake.deadlines[0], fake.deadlines[1])
+
 
 if __name__ == "__main__":
     unittest.main()

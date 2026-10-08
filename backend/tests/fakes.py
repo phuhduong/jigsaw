@@ -24,8 +24,6 @@ from models import (
     Review,
     SignalCheck,
     SourceNumber,
-    SourceSupportNeed,
-    SupportNeed,
 )
 from numeric import bind_quantities
 from pipeline import Workflow
@@ -175,28 +173,16 @@ def legacy_support_example():
             product=run.components[0].product.model_copy(update={"mpn": "CAP-1", "package": "0603"}),
         )
     )
-    run.source_support_needs = [
-        SourceSupportNeed(
-            id="D1S1",
-            purpose="U1 bypass",
-            parent_ids=["U1"],
-            necessity="required",
-            connection_requirement="One 4.7 uF bypass capacitor for U1",
-            evidence_ids=["spec"],
-            document_id="doc",
-        )
-    ]
-    run.support_needs = [
-        SupportNeed(
-            id="D1S1",
-            purpose="U1 bypass",
-            parent_ids=["U1"],
-            necessity="required",
-            status="satisfied",
-            component_ids=["C1"],
-            evidence_ids=["spec"],
-        )
-    ]
+    run.source_support_needs = [{
+        "id": "D1S1", "purpose": "U1 bypass", "parent_ids": ["U1"], "necessity": "required",
+        "connection_requirement": "One 4.7 uF bypass capacitor for U1",
+        "evidence_ids": ["spec"], "document_id": "doc",
+    }]
+    run.support_needs = [{
+        "id": "D1S1", "purpose": "U1 bypass", "parent_ids": ["U1"], "necessity": "required",
+        "status": "satisfied", "component_ids": ["C1"], "evidence_ids": ["spec"],
+        "connections": "", "explanation": "",
+    }]
     return run
 
 

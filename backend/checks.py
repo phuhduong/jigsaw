@@ -701,8 +701,7 @@ def run_checks(run: DesignRun) -> list[Finding]:
         | {r.id for r in run.requirements}
         | {r.id for r in run.rails}
         | {i.id for i in run.interfaces}
-        | {s.id for s in run.support_needs}
-        | {s.id for s in run.source_support_needs}
+        | {s.get("id") for s in [*run.support_needs, *run.source_support_needs]}
         | {a.id for a in run.assumptions}
         | {s.id for s in run.signal_checks}
         | {"external"}

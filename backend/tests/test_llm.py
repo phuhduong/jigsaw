@@ -2,6 +2,7 @@
 
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from fakes import drain
 from llm import Budget, BudgetExceeded, ModelError, ModelGateway
@@ -42,6 +43,23 @@ class ModelGatewayTests(unittest.TestCase):
         self.run = DesignRun(
             original_request="Local fixture", usage=Usage(model_calls=2, input_tokens=10, output_tokens=5)
         )
+
+    def test_model_allowances_must_be_positive(self):
+        for setting in ("MODEL_RPM", "MODEL_TPM", "MODEL_CONTEXT_TOKENS"):
+            with self.subTest(setting=setting), patch.dict("os.environ", {setting: "0"}):
+                with self.assertRaisesRegex(ValueError, "must be positive integers"):
+                    ModelGateway(self.model)
+
+    def test_lazy_model_is_reused_across_calls(self):
+        self.gateway.model = None
+        self.model = LocalModel(responses=[{"value": 1}, {"value": 2}])
+        with patch("llm.get_llm", return_value=self.model) as factory:
+            values = [
+                drain(self.gateway.call(Budget(self.run), "fixture", Answer, "Return a value", {})).value
+                for _ in range(2)
+            ]
+        self.assertEqual(values, [1, 2])
+        factory.assert_called_once_with()
 
     def test_structured_result_is_validated_and_actual_usage_is_added(self):
         result = drain(self.gateway.call(Budget(self.run), "fixture", Answer, "Return a value", {}, max_output=100))

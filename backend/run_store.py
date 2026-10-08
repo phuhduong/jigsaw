@@ -1,4 +1,4 @@
-"""Atomic local run snapshots and BOM projections; no separate purchasing state."""
+"""Persist design runs atomically and derive purchasing exports."""
 
 from __future__ import annotations
 
@@ -18,8 +18,8 @@ _RUN_ID = re.compile(r"^[a-f0-9]{32}$")
 
 
 class RunStore:
-    def __init__(self, root: str | Path | None = None):
-        self.root = Path(root) if root is not None else Path(__file__).parent / "data" / "runs"
+    def __init__(self, root: str | Path):
+        self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
 
     def _path(self, run_id: str) -> Path:
@@ -46,7 +46,35 @@ class RunStore:
                 temporary.unlink()
 
     def load(self, run_id: str) -> DesignRun:
-        run = DesignRun.model_validate_json(self._path(run_id).read_text(encoding="utf-8"))
+        snapshot = json.loads(self._path(run_id).read_text(encoding="utf-8"))
+        if isinstance(snapshot, dict):
+            # Retired fields belong to saved-file adaptation, not current model schemas.
+            for collection, field in (
+                ("components", "requirement_ids"),
+                ("rails", "source_pin"),
+                ("interfaces", "electrical_basis"),
+                ("regulator_checks", "dissipation_limit"),
+            ):
+                records = snapshot.get(collection, [])
+                if not isinstance(records, list):
+                    continue
+                for record in records:
+                    if not isinstance(record, dict):
+                        continue
+                    record.pop(field, None)
+                    if collection == "rails":
+                        nested, nested_field = "loads", "pin"
+                    elif collection == "interfaces":
+                        nested, nested_field = "endpoints", "pins"
+                    else:
+                        continue
+                    if isinstance(record.get(nested), list):
+                        for item in record[nested]:
+                            if isinstance(item, dict):
+                                item.pop(nested_field, None)
+            if snapshot.get("compatibility") == "incomplete":
+                snapshot["compatibility"] = None
+        run = DesignRun.model_validate(snapshot)
         if run.id != run_id or run.schema_version != 1:
             raise ValueError("Unsupported or mismatched saved run")
         return run
@@ -129,8 +157,7 @@ def bom_rows(run: DesignRun) -> list[dict]:
                     "url": url,
                 }
             )
-        # Custom reeling may add an unquoted setup fee. Ordinary Tape & Reel is
-        # not custom reeling; retain the existing total-price ranking otherwise.
+        # Prefer ordinary packaging to custom reeling with an unquoted setup fee.
         offer, quantity, price, url = None, demand, None, _http_url(product.product_url)
         availability = "unknown"
         if options:
@@ -232,7 +259,7 @@ def export_csv(run: DesignRun) -> str:
 
 
 def product_context(product, quantity=1):
-    """Keep catalog engineering fields, not every packaging price tier, in model prompts."""
+    """Project the catalog fields needed for engineering and quantity selection."""
     if isinstance(product, Product):
         product = product.model_dump()
     result = {

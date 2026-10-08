@@ -108,16 +108,24 @@ class SupplierClient:
         # Carries the same budget through MCP to OAuth and DigiKey.
         deadline_ms = (time.time() + timeout) * 1000
         self._initialize(deadline)
-        self._request_id += 1
-        response = self._post(
-            {
-                "jsonrpc": "2.0",
-                "id": self._request_id,
-                "method": "tools/call",
-                "params": {"name": name, "arguments": {**arguments, "deadline_ms": deadline_ms}},
-            },
-            deadline,
-        )
+        for attempt in range(2):
+            self._request_id += 1
+            try:
+                response = self._post(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": self._request_id,
+                        "method": "tools/call",
+                        "params": {"name": name, "arguments": {**arguments, "deadline_ms": deadline_ms}},
+                    },
+                    deadline,
+                )
+                break
+            except SupplierError as error:
+                if attempt or error.status_code != 404:
+                    raise
+                # The MCP server expires idle sessions; reconnect within this operation's deadline.
+                self._initialize(deadline)
         result = _parse_rpc_result(response, self._request_id)
         try:
             content = next(item["text"] for item in result.get("content", []) if item.get("type") == "text")

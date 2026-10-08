@@ -129,6 +129,8 @@ class Workflow:
     @staticmethod
     def _invalidate_parts(run, identifiers):
         """Even same-document replacements must not inherit another variant's facts."""
+        if not identifiers:
+            return
         for field, owners_field in (
             ("evidence", "component_ids"),
             ("evidence_errors", "subject_ids"),
@@ -139,6 +141,7 @@ class Workflow:
                 if owners:
                     kept.append(item.model_copy(update={owners_field: owners}))
             setattr(run, field, kept)
+        run.invalidate_configuration()
 
     def _select_components(self, run, budget, component_ids=None):
         run.stage = "select"
@@ -160,7 +163,7 @@ class Workflow:
                 yield {"type": "progress", "stage": "select", "message": f"Searching for {component.name}: {query}"}
                 try:
                     if query not in cache:
-                        budget.consume("supplier_calls")
+                        budget.consume(supplier_calls=1)
                         cache[query] = self.supplier.search(
                             query,
                             region=run.options.region,
@@ -196,7 +199,7 @@ class Workflow:
                     detail_key = ("detail", *key)
                     if detail_key not in cache:
                         yield {"type": "progress", "stage": "select", "message": f"Confirming {candidate['mpn']}"}
-                        budget.consume("supplier_calls")
+                        budget.consume(supplier_calls=1)
                         offers = candidate.get("offers") or []
                         lookup = offers[0]["sku"] if offers else candidate["mpn"]
                         cache[detail_key] = self.supplier.get_product(
@@ -250,7 +253,7 @@ class Workflow:
                     }
                 try:
                     if url not in existing:
-                        budget.consume("documents")
+                        budget.consume(documents=1)
                         metadata = self.documents.fetch(url, timeout=min(20, budget.remaining()))
                         metadata["pages_read"] = []
                         if metadata["document_id"] not in {d["document_id"] for d in run.documents}:
@@ -431,7 +434,11 @@ class Workflow:
 
     def _extract_evidence(self, run, budget, selections, instructions):
         """Only source extraction writes observations; configuration references them."""
-        run.invalidate_review()
+        # Packet replacement reassigns source-number IDs; prior operands must not rebind.
+        if selections:
+            run.invalidate_configuration()
+        else:
+            run.invalidate_review()
         selected = {c.id: c for c in run.components if c.product}
 
         def current_ids(document_id, identifiers):
@@ -504,7 +511,6 @@ class Workflow:
                 pdf_pages=page_count,
             )
             self._mark_pages_read(run, [selection])
-            self._assert_unique_ids(packet.evidence, "source evidence")
             for index_in_packet, item in enumerate(packet.evidence, 1):
                 item.id = f"D{index}E{index_in_packet}"
                 for number, operand in enumerate(item.numbers, 1):
@@ -590,11 +596,9 @@ class Workflow:
                 and (c.kind != "passive" or c.id in (source_component_ids or ()))
                 for c in run.components
             )
-            if (not run.documents or new_documents == set()) and not missing_source:
-                return selections
-            reading = yield from self._plan_source_reads(run, budget, instructions, new_documents)
-            if not run.documents:
-                return selections
+            reading = []
+            if missing_source or (run.documents and new_documents != set()):
+                reading = yield from self._plan_source_reads(run, budget, instructions, new_documents)
             # A shared family source is replaced as one packet; keep the pages
             # supporting its already selected owners when adding another owner.
             for selection in reading:
@@ -656,7 +660,6 @@ class Workflow:
     def _apply_correction(self, run, correction):
         if correction.configuration is not None and any(c.product is None for c in run.components):
             raise ValueError("Direct configuration requires every component to be selected")
-        previous = run.model_dump(include={"components", "requirements"})
         by_id = {c.id: c for c in run.components}
         for identifier in correction.remove_component_ids:
             by_id.pop(identifier, None)
@@ -674,18 +677,19 @@ class Workflow:
                 raise ValueError("Requirement mapping must name an existing requirement and current component IDs")
         if not set(correction.reread_component_ids) <= by_id.keys():
             raise ValueError("Source reread must name current component IDs")
-        run.components = list(by_id.values())
-        self._invalidate_parts(
-            run, set(correction.remove_component_ids) | {spec.id for spec in correction.replace_components}
-        )
-        for identifier, component_ids in correction.requirement_components.items():
-            requirements[identifier].component_ids = list(component_ids)
+        components = list(by_id.values())
         changed = (
-            previous != run.model_dump(include={"components", "requirements"})
+            run.components != components
+            or any(requirements[key].component_ids != ids for key, ids in correction.requirement_components.items())
             or bool(correction.configuration_instructions.strip())
             or bool(correction.reread_component_ids)
             or correction.configuration is not None
         )
+        removed = set(correction.remove_component_ids) & {c.id for c in run.components}
+        run.components = components
+        self._invalidate_parts(run, removed | {spec.id for spec in correction.replace_components})
+        for identifier, component_ids in correction.requirement_components.items():
+            requirements[identifier].component_ids = list(component_ids)
         if changed:
             run.revision += 1
             run.invalidate_review()
@@ -700,14 +704,22 @@ class Workflow:
             product = component.product
             if not product:
                 continue
-            age = (datetime.now(timezone.utc) - datetime.fromisoformat(product.retrieved_at)).total_seconds()
+            try:
+                retrieved_at = datetime.fromisoformat(product.retrieved_at)
+                age = (
+                    (datetime.now(timezone.utc) - retrieved_at).total_seconds()
+                    if retrieved_at.tzinfo is not None
+                    else float("inf")
+                )
+            except ValueError:
+                age = float("inf")
             if age + budget.remaining() <= 900:
                 continue
             key = (product.manufacturer, product.mpn)
             try:
                 if key not in cache:
                     yield {"type": "progress", "stage": "sourcing", "message": f"Refreshing offer for {product.mpn}"}
-                    budget.consume("supplier_calls")
+                    budget.consume(supplier_calls=1)
                     refreshed = Product.model_validate(
                         self.supplier.get_product(
                             product.offers[0].sku if product.offers else product.mpn,
@@ -752,14 +764,15 @@ class Workflow:
             correction.replace_components or correction.add_components or correction.remove_component_ids
         )
         instructions = correction.configuration_instructions
-        if not parts_changed and correction.reread_component_ids:
+        if parts_changed or correction.reread_component_ids:
             return (
                 yield from self._source_and_configure(
-                    run, budget, instructions, source_component_ids=set(correction.reread_component_ids)
+                    run,
+                    budget,
+                    instructions,
+                    source_component_ids=None if parts_changed else set(correction.reread_component_ids),
                 )
             )
-        if parts_changed:
-            return (yield from self._source_and_configure(run, budget, instructions))
         if instructions.strip():
             added = yield from self._configure_bom(run, budget, instructions)
             if any(
@@ -771,7 +784,7 @@ class Workflow:
 
     def execute(self, run: DesignRun):
         run.numeric_binding_version = 1
-        # A refinement starts a new review, not the historical support-completeness workflow.
+        # New runs use source evidence and notes rather than support inventories.
         run.source_support_needs = []
         run.support_needs = []
         budget = Budget(run)
@@ -836,7 +849,7 @@ class Workflow:
                     run.terminal_reason = "No further supported correction was found"
                     break
                 last_correction = signature
-                budget.consume("correction_rounds")
+                budget.consume(correction_rounds=1)
                 yield self._snapshot(run)
                 yield from self._select_components(run, budget)
                 if correction.configuration is not None:

@@ -5,6 +5,7 @@ import io
 import json
 import tempfile
 import unittest
+from pathlib import Path
 
 from checks import refresh_checks, run_checks
 from fakes import example, legacy_support_example
@@ -105,11 +106,8 @@ class CheckTests(unittest.TestCase):
         self.assertIn("U1 output_low_max", finding.explanation)
         self.assertIn("sensor_low belongs to U2", finding.explanation)
 
-    def test_legacy_manufacturer_guidance_cannot_bypass_numeric_checks(self):
+    def test_protocol_review_cannot_bypass_numeric_checks(self):
         run = example()
-        run.interfaces[0] = Interface.model_validate(
-            {**run.interfaces[0].model_dump(), "electrical_basis": "manufacturer_guidance"}
-        )
         next(f for f in run.findings if f.area == "signals").subject_ids.append("bus")
         run.signal_checks = run.signal_checks[:1]
         finding = next(f for f in run_checks(run) if f.id == "code:interface_directions:bus")
@@ -204,22 +202,6 @@ class CheckTests(unittest.TestCase):
         signal.input_low_max = Quantity(value=0.9, unit="V", basis="max", evidence_ids=["spec"])
         self.assertEqual(signal_status(run), "fail")
 
-    def test_legacy_pin_data_is_readable_but_not_requested_or_reported(self):
-        for model, data, field in (
-            (PowerLoad, {"component_id": "U1", "pin": "VDD"}, "pin"),
-            (
-                Rail,
-                {"id": "supply", "source_component_id": "external", "description": "Supply", "source_pin": "3V3"},
-                "source_pin",
-            ),
-            (Endpoint, {"component_id": "U1", "pins": ["SDA", "SCL"]}, "pins"),
-        ):
-            with self.subTest(field=field):
-                record = model.model_validate(data)
-                self.assertEqual(getattr(record, field), data[field])
-                self.assertNotIn(field, record.model_dump())
-                self.assertNotIn(field, model.model_json_schema()["properties"])
-
     def test_partial_review_passes_without_area_coverage_but_absent_review_has_no_verdict(self):
         for findings in ([], [f for f in example().findings if f.area != "support"]):
             with self.subTest(findings=len(findings)):
@@ -282,11 +264,11 @@ class CheckTests(unittest.TestCase):
         run = legacy_support_example()
         run.components = run.components[:2]
         need = run.support_needs[0]
-        need.status, need.component_ids = "unresolved", []
+        need.update(status="unresolved", component_ids=[])
         run = DesignRun.model_validate(run.model_dump())
         refresh_checks(run)
         self.assertEqual(run.compatibility, "checked")
-        self.assertEqual(run.support_needs[0].status, "unresolved")
+        self.assertEqual(run.support_needs[0]["status"], "unresolved")
         self.assertTrue(run.source_support_needs)
         self.assertFalse(any(f.method == "code" and f.area == "support" for f in run.findings))
 
@@ -342,8 +324,8 @@ class CheckTests(unittest.TestCase):
                 configuration="Board programming pads connect to a 3.3 V UART tool",
                 evidence_ids=["spec"],
                 endpoints=[
-                    Endpoint(component_id="U1", pins=["TX", "RX"]),
-                    Endpoint(component_id="external", pins=["RX", "TX"], assumption_id="programmer"),
+                    Endpoint(component_id="U1"),
+                    Endpoint(component_id="external", assumption_id="programmer"),
                 ],
             )
         )
@@ -372,17 +354,36 @@ class StoreTests(unittest.TestCase):
         self.assertIsNone(row["purchase_url"])
         self.assertIsNone(row["datasheet_url"])
 
-    def test_legacy_incomplete_is_unreviewed_in_store_and_exports_not_regraded(self):
-        legacy = example().model_dump()
+    def test_legacy_fields_are_adapted_when_loading_without_regrading(self):
+        legacy = legacy_support_example().model_dump()
         legacy["compatibility"] = "incomplete"
-        run = DesignRun.model_validate(legacy)
+        legacy["components"][0]["requirement_ids"] = ["req"]
+        legacy["rails"][0]["source_pin"] = "3V3"
+        legacy["rails"][0]["loads"][0]["pin"] = "VDD"
+        legacy["interfaces"][0]["electrical_basis"] = "manufacturer_guidance"
+        legacy["interfaces"][0]["endpoints"][0]["pins"] = ["SDA", "SCL"]
+        legacy["regulator_checks"] = [{
+            "component_id": "U1", "kind": "linear", "input_rail_id": "supply", "output_rail_id": "supply",
+            "dissipation_limit": {"value": 10, "unit": "W"},
+        }]
         with tempfile.TemporaryDirectory() as directory:
             store = RunStore(directory)
-            store.save(run)
-            saved = store.load(run.id)
+            (Path(directory) / f"{legacy['id']}.json").write_text(json.dumps(legacy), encoding="utf-8")
+            saved = store.load(legacy["id"])
         self.assertTrue(saved.review_completed)
+        self.assertEqual(saved.support_needs, legacy["support_needs"])
+        self.assertEqual(saved.source_support_needs, legacy["source_support_needs"])
         self.assertIsNone(saved.compatibility)
         exported = json.loads(export_json(saved))
+        for record, field in (
+            (exported["components"][0], "requirement_ids"),
+            (exported["rails"][0], "source_pin"),
+            (exported["rails"][0]["loads"][0], "pin"),
+            (exported["interfaces"][0], "electrical_basis"),
+            (exported["interfaces"][0]["endpoints"][0], "pins"),
+            (exported["regulator_checks"][0], "dissipation_limit"),
+        ):
+            self.assertNotIn(field, record)
         self.assertIsNone(exported["compatibility"])
         self.assertIsNone(exported["bom"][0]["review_status"])
         self.assertEqual(next(csv.DictReader(io.StringIO(export_csv(saved))))["review_status"], "")
@@ -548,22 +549,19 @@ class ThermalCheckTests(unittest.TestCase):
         ]
         return run
 
-    def test_thermal_allowance_is_calculated_not_taken_from_model_scalar(self):
+    def test_thermal_allowance_is_calculated_from_temperature_and_package(self):
         run = self.make_run()
         regulator = run.regulator_checks[0]
         regulator.ambient_max.value, regulator.junction_target.value, regulator.theta_ja.value = 55, 125, 125
         run.rails[0].voltage_max.value = 5.4
-        regulator.dissipation_limit = Quantity(value=0.84, unit="W", basis="estimate", assumption_id="thermal")
         finding = next(f for f in run_checks(run) if f.id == "code:dissipation:U1")
         self.assertEqual(finding.status, "fail")
         self.assertIn("dissipation 0.84 W", finding.explanation)
         self.assertIn("(125 - 55) / 125 = 0.56 W", finding.explanation)
-        self.assertNotIn("dissipation_limit", type(regulator).model_json_schema()["properties"])
 
     def test_thermal_operands_need_package_evidence_and_valid_headroom(self):
         run = self.make_run()
         regulator = run.regulator_checks[0]
-        regulator.dissipation_limit = Quantity(value=10, unit="W", basis="estimate", assumption_id="thermal")
         regulator.theta_ja.evidence_ids, regulator.theta_ja.assumption_id = [], "thermal"
 
         def thermal_status():

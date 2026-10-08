@@ -1,9 +1,12 @@
 """Small application/state checks using local workflows and supplier/model fakes."""
 
 import json
+import os
 import tempfile
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from app import create_app
 from checks import refresh_checks
@@ -116,6 +119,15 @@ class ApiTests(unittest.TestCase):
         self.app.config["TESTING"] = True
         self.client = self.app.test_client()
 
+    def test_default_storage_saves_designs_in_the_user_data_directory(self):
+        with tempfile.TemporaryDirectory() as data_home:
+            with patch.dict(os.environ, {"XDG_DATA_HOME": data_home, "DATA_DIR": ""}):
+                client = create_app(workflow=LocalWorkflow()).test_client()
+            result = events(client.post("/api/component-analysis", json={"query": "Two sensors"}, buffered=True))[-1]
+            path = Path(data_home) / "jigsaw" / "runs" / f"{result['run_id']}.json"
+            self.assertTrue(path.is_file())
+            self.assertEqual(client.get(f"/api/runs/{result['run_id']}").get_json(), result["snapshot"])
+
     def test_refinement_rejects_an_unsupported_saved_base(self):
         base = example()
         base.schema_version = 99
@@ -216,10 +228,13 @@ class WorkflowTests(unittest.TestCase):
 
     def test_correction_repairs_requirement_mapping_without_rewriting_requirement(self):
         run = example()
+        before_run = run.model_dump()
+        workflow = Workflow(object(), object(), object())
+        self.assertFalse(workflow._apply_correction(run, Correction(reason="No change", remove_component_ids=["absent"])))
+        self.assertEqual(run.model_dump(), before_run)
         requirement = run.requirements[0]
         requirement.component_ids = []
         before = requirement.model_dump(exclude={"component_ids"})
-        workflow = Workflow(object(), object(), object())
         self.assertTrue(
             workflow._apply_correction(
                 run, Correction(reason="Restore affected components", requirement_components={"req": ["U1", "U2"]})
@@ -243,6 +258,7 @@ class WorkflowTests(unittest.TestCase):
         run.limits.correction_rounds = 1
         next(n for n in run.evidence[0].numbers if n.role == "output_low").value = 1.2
         untouched = run.evidence[1].model_dump()
+        proposal = configuration_for(run).model_copy(deep=True)
 
         def extract(payload, blocks):
             fact = payload["previous_observations"][0].model_copy(
@@ -258,7 +274,7 @@ class WorkflowTests(unittest.TestCase):
             )
 
         def configure(payload, blocks):
-            configuration = configuration_for(run)
+            configuration = proposal.model_copy(deep=True)
             source = next(e for e in run.evidence if e.fact == "VOL maximum 0.4 V")
             configuration.signal_checks[0].output_low_max = Quantity(
                 source_ids=[source.numbers[0].id]
@@ -320,6 +336,45 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual((run.lifecycle, run.compatibility), ("finished", "checked"))
         self.assertEqual(len(gateway.calls_for(Review)), 1)
         self.assertTrue(any(f.area == "evidence" and f.status == "unknown" for f in run.findings))
+
+    def test_unavailable_sources_still_produce_an_operating_configuration(self):
+        class Documents(SourcePages):
+            def fetch(self, *args, **kwargs):
+                raise DocumentError("Source unavailable")
+
+        run = workflow_example()
+        configuration = configuration_for(run)
+        run.invalidate_configuration()
+        run.documents, run.evidence = [], []
+        for component in run.components:
+            component.document_ids = []
+        gateway = gateway_for(
+            run,
+            {ReadingPlan: ReadingPlan(selections=[]), OperatingConfiguration: configuration},
+        )
+        list(Workflow(Documents(), object(), gateway).execute(run))
+        self.assertEqual([rail.id for rail in run.rails], ["supply"])
+        self.assertEqual([interface.id for interface in run.interfaces], ["bus"])
+        self.assertEqual((run.lifecycle, run.compatibility), ("finished", "checked"))
+        self.assertTrue(any(f.area == "power" and f.status == "unknown" for f in run.findings))
+
+    def test_part_replacement_discards_operating_records_and_preserves_unchanged_evidence(self):
+        run = split_source_example()
+        run.configuration_notes = ["Old module's programming method"]
+        unchanged = run.evidence[1].model_dump()
+        requirements = [r.model_dump() for r in run.requirements]
+        replacement = component_spec(run.components[0]).model_copy(update={"search_query": "NEW-MODULE"})
+        Workflow(object(), object(), object())._apply_correction(
+            run, Correction(reason="Replace module", replace_components=[replacement])
+        )
+        self.assertEqual(run.evidence[0].model_dump(), unchanged)
+        self.assertEqual([r.model_dump() for r in run.requirements], requirements)
+        self.assertEqual(len(run.components), 2)
+        self.assertTrue(run.assumptions)
+        self.assertEqual(
+            [run.rails, run.interfaces, run.signal_checks, run.regulator_checks, run.configuration_notes],
+            [[], [], [], [], []],
+        )
 
     def test_mapping_gap_does_not_trigger_correction_or_rebuild(self):
         run = workflow_example()
@@ -734,6 +789,7 @@ class WorkflowTests(unittest.TestCase):
         drain(workflow._extract_evidence(run, Budget(run), [selection], ""))
         self.assertEqual({item.document_id for item in run.evidence}, {"doc"})
         self.assertEqual(run.model_dump()["evidence"][0]["document_id"], "doc")
+        self.assertEqual([run.rails, run.interfaces, run.signal_checks, run.regulator_checks], [[], [], [], []])
         raw["evidence"][0]["document_id"] = "another-source"
         with self.assertRaises(ValueError):
             gateway.calls_for(EvidencePacket)[-1]["schema"].model_validate(raw)
@@ -824,6 +880,20 @@ class WorkflowTests(unittest.TestCase):
             rows = gateway.calls_for(schema)[0]["payload"][field]["purchasing_bom"]
             self.assertEqual(sum(row["extended_price"] for row in rows), 20)
         self.assertEqual((run.lifecycle, run.compatibility), ("finished", "issues_found"))
+
+    def test_saved_offers_with_unknown_or_naive_timestamps_are_refreshed(self):
+        for timestamp in ("unknown", "2026-10-08T12:00:00"):
+            with self.subTest(timestamp=timestamp):
+                run = workflow_example()
+                for component in run.components:
+                    component.product.retrieved_at = timestamp
+                refreshed = example().components[0].product
+                refreshed.retrieved_at = now()
+                refreshed.offers[0].price_breaks = [PriceBreak(quantity=1, unit_price=7)]
+                supplier = SimpleNamespace(get_product=lambda *args, **kwargs: refreshed.model_dump())
+                drain(Workflow(object(), supplier, object())._refresh_offers(run, Budget(run)))
+                self.assertTrue(all(c.product.retrieved_at == refreshed.retrieved_at for c in run.components))
+                self.assertTrue(all(c.product.offers[0].price_breaks[0].unit_price == 7 for c in run.components))
 
     def test_review_catches_requirement_lost_by_refinement_planner(self):
         run = workflow_example()
@@ -938,31 +1008,6 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(run.components[0].product.mpn, "NO-DOC")
         self.assertIsNone(run.components[0].selection_error)
         self.assertEqual(run.components[1].product.mpn, "SENSOR-1")
-
-    def test_invalid_source_and_targeted_correction_preserve_whole_design(self):
-        class Documents(SourcePages):
-            def quote_matches(self, *args):
-                return False
-
-        workflow = Workflow(Documents(), supplier=object(), gateway=object())
-        run = example()
-        run.documents[0]["pages_read"] = [1]
-        run.evidence, run.evidence_errors = workflow._filter_evidence(run, run.evidence, {"U1", "U2"})
-        self.assertEqual(run.evidence, [])
-        replacement = component_spec(run.components[0])
-        replacement.search_query = "REPLACEMENT-1"
-        self.assertTrue(
-            workflow._apply_correction(
-                run, Correction(reason="Replace selected sensor", replace_components=[replacement])
-            )
-        )
-        self.assertIsNone(run.components[0].product)
-        self.assertEqual(
-            (run.components[1].product.mpn, len(run.rails), run.requirements[0].component_ids),
-            ("SENSOR-1", 1, ["U1", "U2"]),
-        )
-        self.assertEqual((run.compatibility, run.review_completed, run.revision), (None, False, 2))
-
 
 if __name__ == "__main__":
     unittest.main()

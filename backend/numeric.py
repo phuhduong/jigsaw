@@ -106,21 +106,7 @@ def bind_quantities(run: DesignRun, evidence: dict[str, Evidence]) -> None:
     def bind_direct(quantity, owner, roles, unit, *, corner=None, bound=None, assume=False, margin=False):
         def calculate():
             quantity.calculation = "direct"
-            references = quantity.source_ids
-            if bound and len(references) == 1 and references[0] not in sources and references[0] not in duplicates:
-                # Recover a mistyped/reference-level ID only when the existing
-                # owner, parameter and bound identify exactly one voltage limit.
-                owners = {owner} if isinstance(owner, str) else set(owner)
-                candidates = [
-                    key for key, (item, number) in sources.items()
-                    if owners.intersection(item.component_ids)
-                    and number.role in roles and number.basis == bound
-                    and _UNITS.get(number.unit, (None,))[0] == unit
-                    and (references[0] not in evidence or item.id == references[0])
-                ]
-                if len(candidates) == 1:
-                    references = candidates
-            entries = source_records(references, owner, roles)
+            entries = source_records(quantity.source_ids, owner, roles)
             if not entries:
                 if roles == {"quiescent_current"} and any(
                     owner in item.component_ids and number.role == "quiescent_current"
@@ -152,7 +138,6 @@ def bind_quantities(run: DesignRun, evidence: dict[str, Evidence]) -> None:
             if number.role == "dropout" and basis == "typical":
                 raise ValueError("Typical dropout alone does not guarantee headroom; use a documented bound or disclose a conservative estimated margin.")
             set_bound_value(quantity, value, unit, basis, entries, dependencies)
-            quantity.source_ids = references
         return bind_once(quantity, calculate)
 
     def bind_supply_assumption(quantity, rail, roles, unit):

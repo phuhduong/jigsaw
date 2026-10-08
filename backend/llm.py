@@ -1,4 +1,4 @@
-"""Model portability, resource accounting and bounded calls; no orchestration framework."""
+"""Bounded structured model calls and resource accounting."""
 
 from __future__ import annotations
 
@@ -46,12 +46,13 @@ class Budget:
             raise BudgetExceeded("Run time budget exhausted")
         return left
 
-    def consume(self, field: str, amount: int = 1):
+    def consume(self, **amounts: int):
         self.remaining()
-        used = getattr(self.run.usage, field)
-        if used + amount > getattr(self.run.limits, field):
-            raise BudgetExceeded(f"Run {field} budget exhausted")
-        setattr(self.run.usage, field, used + amount)
+        for field, amount in amounts.items():
+            if getattr(self.run.usage, field) + amount > getattr(self.run.limits, field):
+                raise BudgetExceeded(f"Run {field} budget exhausted")
+        for field, amount in amounts.items():
+            setattr(self.run.usage, field, getattr(self.run.usage, field) + amount)
 
 
 def get_llm():
@@ -81,6 +82,8 @@ class ModelGateway:
         self.rpm = int(os.getenv("MODEL_RPM", "15"))
         self.tpm = int(os.getenv("MODEL_TPM", "250000"))
         self.context_limit = int(os.getenv("MODEL_CONTEXT_TOKENS", "1048576"))
+        if min(self.rpm, self.tpm, self.context_limit) <= 0:
+            raise ValueError("MODEL_RPM, MODEL_TPM, and MODEL_CONTEXT_TOKENS must be positive integers")
 
     def call(self, budget, stage, schema, instructions, payload, blocks=None, *, max_output=3000, pdf_pages=0):
         """Yield progress before each attempt; return validated data through yield-from."""
@@ -103,7 +106,8 @@ class ModelGateway:
             SystemMessage(content=instructions),
             HumanMessage(content=[{"type": "text", "text": payload_text}, *blocks]),
         ]
-        model = self.model or get_llm()
+        if self.model is None:
+            self.model = get_llm()
         for attempt in range(2):
             budget.remaining()
             while True:
@@ -118,21 +122,11 @@ class ModelGateway:
                 pause = min(50, wait)
                 yield {"type": "progress", "stage": stage, "message": f"Waiting {pause:.0f}s for model quota"}
                 time.sleep(pause)
-            reservation = {
-                "model_calls": 1,
-                "input_tokens": estimate,
-                "output_tokens": max_output,
-                "pdf_pages": pdf_pages,
-            }
-            for field, amount in reservation.items():
-                if getattr(budget.run.usage, field) + amount > getattr(budget.run.limits, field):
-                    raise BudgetExceeded(f"Run {field} budget exhausted")
-            for field, amount in reservation.items():
-                budget.consume(field, amount)
+            budget.consume(model_calls=1, input_tokens=estimate, output_tokens=max_output, pdf_pages=pdf_pages)
             _requests.append((time.monotonic(), estimate))
             yield {"type": "progress", "stage": stage, "message": f"{stage}: model attempt {attempt + 1}"}
             try:
-                result = model.with_structured_output(schema, method="json_schema", include_raw=True).invoke(
+                result = self.model.with_structured_output(schema, method="json_schema", include_raw=True).invoke(
                     messages,
                     max_output_tokens=max_output,
                     timeout=min(45, budget.remaining()),

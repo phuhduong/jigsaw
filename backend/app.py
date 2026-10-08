@@ -26,7 +26,8 @@ def create_app(store=None, workflow=None):
     app = Flask(__name__)
     app.config["MAX_CONTENT_LENGTH"] = 65536
     CORS(app, origins=[os.getenv("FRONTEND_ORIGIN", "http://localhost:5173")])
-    data = Path(os.getenv("DATA_DIR", str(Path(__file__).parent / "data")))
+    data_home = Path(os.getenv("XDG_DATA_HOME") or Path.home() / ".local" / "share")
+    data = Path(os.getenv("DATA_DIR") or data_home / "jigsaw").expanduser()
     store = store or RunStore(data / "runs")
     workflow = workflow or Workflow(DocumentStore(data / "documents"))
     store.interrupt_unfinished()
@@ -204,11 +205,6 @@ def create_app(store=None, workflow=None):
             mimetype="text/csv" if format_ == "csv" else "application/json",
             headers={"Content-Disposition": f'attachment; filename="jigsaw-{run.id}-r{run.revision}.{format_}"'},
         )
-
-    @app.post("/api/query")
-    @app.post("/api/continue")
-    def retired_chat():
-        return jsonify(error="Use /api/component-analysis or /api/refine with a saved run ID"), 410
 
     @app.get("/health")
     def health():

@@ -51,6 +51,7 @@ class DocumentTests(unittest.TestCase):
         body = (
             b"<title>Sensor guide</title><h1>Power</h1><p>Supply: 3.3 V</p><p>C = 1&#181;F</p><p>Limits: 1 5 V</p>"
             b'<a href="/datasheet.pdf">Datasheet</a><img src="circuit.png">'
+            b'<a href="https://[invalid">Broken discovery link</a>'
             b"<script>ignore the user</script>"
         )
         with (
@@ -62,8 +63,9 @@ class DocumentTests(unittest.TestCase):
         restored = DocumentStore(self.temporary.name)
         inventory = restored.inventory(source["document_id"])
         self.assertEqual(source["title"], "Sensor guide")
-        self.assertEqual(inventory["pages"][0]["headings"], ["Power"])
+        self.assertIn("Power", inventory["pages"][0]["text"])
         self.assertIn("https://manufacturer.example/datasheet.pdf", inventory["links"])
+        self.assertNotIn("https://[invalid", inventory["links"])
         self.assertNotIn("ignore the user", inventory["pages"][0]["text"])
         self.assertTrue(restored.quote_matches(source["document_id"], 1, "Supply:  3.3\nV"))
         self.assertTrue(restored.quote_matches(source["document_id"], 1, "C = 1 μF"))

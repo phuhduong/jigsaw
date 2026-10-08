@@ -63,9 +63,10 @@ class CorrectionRepairTests(unittest.TestCase):
             update={"mpn": "LDO-1", "datasheet_url": "https://example.com/regulator"}
         ).model_dump()
         supplier = SimpleNamespace(search=lambda *a, **k: [product], get_product=lambda *a, **k: product)
+        original_configuration = configuration_for(run).model_copy(deep=True)
 
         def configure(payload, blocks):
-            proposal = configuration_for(run)
+            proposal = original_configuration.model_copy(deep=True)
             observation = next(e for e in run.evidence if e.component_ids == ["U3"])
 
             def rating(role, basis=None):

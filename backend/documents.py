@@ -36,8 +36,17 @@ def _normalize_lines(value):
 
 
 def _resolve_links(values, base_url):
-    resolved = (urljoin(base_url, value) for value in values if value)
-    return list(dict.fromkeys(url for url in resolved if urlsplit(url).scheme == "https"))
+    resolved = []
+    for value in values:
+        if not value:
+            continue
+        try:
+            url = urljoin(base_url, value)
+            if urlsplit(url).scheme == "https":
+                resolved.append(url)
+        except ValueError:
+            continue
+    return list(dict.fromkeys(resolved))
 
 
 class _HTMLSource(HTMLParser):
@@ -46,9 +55,7 @@ class _HTMLSource(HTMLParser):
         self.text = []
         self.links = []
         self.figures = []
-        self.headings = []
         self.title = []
-        self._heading = None
         self._in_title = False
         self._hidden = 0
 
@@ -68,7 +75,6 @@ class _HTMLSource(HTMLParser):
             self.text.append("\t")
         if tag in {"h1", "h2", "h3", "h4", "h5", "h6"}:
             self.text.append("\n")
-            self._heading = []
         if tag == "title":
             self._in_title = True
 
@@ -77,9 +83,7 @@ class _HTMLSource(HTMLParser):
             self._hidden = max(0, self._hidden - 1)
         if self._hidden:
             return
-        if tag in {"h1", "h2", "h3", "h4", "h5", "h6"} and self._heading is not None:
-            self.headings.append(_normalize_text(" ".join(self._heading)))
-            self._heading = None
+        if tag in {"h1", "h2", "h3", "h4", "h5", "h6"}:
             self.text.append("\n")
         if tag == "title":
             self._in_title = False
@@ -90,8 +94,6 @@ class _HTMLSource(HTMLParser):
         self.text.append(data)
         if self._in_title:
             self.title.append(data)
-        if self._heading is not None:
-            self._heading.append(data)
 
 
 class DocumentStore:
@@ -339,7 +341,6 @@ class DocumentStore:
                         "page_id": f"{document_id}:p{number}",
                         "text": text,
                         "text_status": status,
-                        "headings": [line.strip() for line in text.splitlines() if line.strip()][:12],
                         "links": _resolve_links(links, record["url"]),
                         "figure_urls": [],
                     }
@@ -353,7 +354,6 @@ class DocumentStore:
                     "page_id": f"{document_id}:p1",
                     "text": text,
                     "text_status": "available" if text.strip() else "empty",
-                    "headings": parser.headings,
                     "links": _resolve_links(parser.links, record["url"]),
                     "figure_urls": _resolve_links(parser.figures, record["url"]),
                 }

@@ -53,23 +53,18 @@ def regulator_example():
 
 
 class NumericTests(unittest.TestCase):
-    def test_voltage_reference_repair_uses_one_existing_owner_parameter_bound(self):
+    def test_invalid_voltage_references_remain_diagnostics_without_guessing(self):
         run = example()
         run.numeric_binding_version = 1
         high = run.signal_checks[0].input_high_min = sourced("mistyped-id", value=9, unit="V")
         maximum = run.rails[0].loads[0].voltage_max = sourced("spec")
         refresh_checks(run)
-        self.assertEqual((high.source_ids, high.value, high.binding_error), (["specN4"], 2.3, ""))
-        self.assertEqual((maximum.source_ids, maximum.value, maximum.binding_error), (["specN2"], 3.6, ""))
-
-    def test_voltage_reference_repair_does_not_choose_between_limits_or_replace_known_ids(self):
-        run = example()
-        run.numeric_binding_version = 1
-        high = run.signal_checks[0].input_high_min = sourced("mistyped-id")
-        run.evidence[0].numbers.append(number("other-high", "input_high", 2.5, "V", "min"))
-        refresh_checks(run)
+        self.assertEqual(high.source_ids, ["mistyped-id"])
+        self.assertEqual(maximum.source_ids, ["spec"])
         self.assertTrue(high.binding_error)
-        high.source_ids = ["specN3"]  # A real current fact is not a mistyped voltage reference.
+        self.assertTrue(maximum.binding_error)
+        self.assertEqual(run.compatibility, "checked")
+        high.source_ids = ["specN3"]
         refresh_checks(run)
         self.assertTrue(high.binding_error)
 

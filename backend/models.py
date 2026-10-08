@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Any, Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic.json_schema import SkipJsonSchema
 
 
@@ -96,8 +96,6 @@ class ComponentSpec(Record):
 
 
 class Component(ComponentSpec):
-    # Read historical snapshots without sending the redundant inverse mapping to models.
-    requirement_ids: SkipJsonSchema[list[str]] = Field(default_factory=list, exclude=True)
     product: Product | None = None
     selection_reason: str = ""
     selection_error: str | None = None
@@ -157,7 +155,7 @@ class Quantity(Record):
     calculation: SkipJsonSchema[Literal["direct", "output_min", "output_max", "input_min", "linear_input"]] = "direct"
     binding_error: SkipJsonSchema[str] = ""
     source_conditions: SkipJsonSchema[list[str]] = Field(default_factory=list)
-    # Computed by binding, retained in public reports and historical snapshots.
+    # Computed by binding and retained in diagnostic reports.
     evidence_ids: SkipJsonSchema[list[str]] = Field(default_factory=list)
     assumption_id: str | None = Field(
         default=None,
@@ -168,12 +166,10 @@ class Quantity(Record):
     )
 
 
-# Legacy wiring fields remain readable but are omitted from new schemas and reports.
 class PowerLoad(Record):
     """A powered device or a passive branch included in the rail's current budget."""
 
     component_id: str
-    pin: SkipJsonSchema[str] = Field(default="", exclude=True)
     voltage_min: Quantity | None = Field(
         default=None,
         description=(
@@ -203,7 +199,6 @@ class PowerLoad(Record):
 class Rail(Record):
     id: str
     source_component_id: str = Field(description="Selected component ID, or external for an explicitly assumed supply")
-    source_pin: SkipJsonSchema[str] = Field(default="", exclude=True)
     description: str
     voltage_min: Quantity | None = Field(
         default=None,
@@ -232,7 +227,6 @@ class Rail(Record):
 
 class Endpoint(Record):
     component_id: str
-    pins: SkipJsonSchema[list[str]] = Field(default_factory=list, exclude=True)
     address: str | None = None
     assumption_id: str | None = Field(
         default=None, description="For component_id='external', the declared off-board tool/interface assumption"
@@ -254,8 +248,6 @@ class Interface(Record):
             "separately."
         ),
     )
-    # Read experimental snapshots; this field no longer alters electrical checks.
-    electrical_basis: SkipJsonSchema[str] = Field(default="limits", exclude=True)
 
 
 class SignalCheck(Record):
@@ -286,8 +278,6 @@ class RegulatorCheck(Record):
         default=None,
         description="Regulator's own supply/ground current. Bind its source number or disclose a conservative estimate. Code includes it in linear input current and heat.",
     )
-    # Historical scalar is readable, but never exported or used for thermal approval.
-    dissipation_limit: SkipJsonSchema[Quantity | None] = Field(default=None, exclude=True)
     ambient_max: Quantity | None = Field(
         default=None,
         description=(
@@ -319,39 +309,6 @@ class RegulatorCheck(Record):
             "to obtain a thermal pass."
         ),
     )
-
-
-class SourceSupportNeed(Record):
-    """Historical support-completeness record; no longer generated or checked."""
-
-    id: str
-    purpose: str
-    parent_ids: list[str]
-    necessity: Literal["required", "recommended"]
-    connection_requirement: str = Field(
-        default="",
-        description=(
-            "Functional support specification: required values, quantities and operating conditions; no pin mapping"
-        ),
-    )
-    evidence_ids: list[str]
-    document_id: SkipJsonSchema[str | None] = None
-
-
-class SupportNeed(Record):
-    """Historical support fulfillment, retained for saved-run readability."""
-
-    id: str
-    purpose: str
-    parent_ids: list[str]
-    necessity: Literal["required", "recommended", "optional"]
-    status: Literal["satisfied", "included", "not_applicable", "unresolved"] = Field(
-        description="satisfied: selected external component_ids fulfill this need; included: already internal to the purchased parent; not_applicable: explicitly justified omission; unresolved: still missing"
-    )
-    component_ids: list[str] = Field(default_factory=list)
-    connections: str = Field(default="", description="Optional purpose/operating arrangement; no pin mapping")
-    evidence_ids: list[str]
-    explanation: str = ""
 
 
 Area = Literal["requirements", "power", "signals", "support", "evidence"]
@@ -427,9 +384,9 @@ class DesignRun(Record):
     components: list[Component] = Field(default_factory=list)
     documents: list[dict[str, Any]] = Field(default_factory=list)
     evidence: list[Evidence] = Field(default_factory=list)
-    # Preserve the public saved-run shape; new workflows use evidence and notes instead.
-    source_support_needs: SkipJsonSchema[list[SourceSupportNeed]] = Field(default_factory=list)
-    support_needs: SkipJsonSchema[list[SupportNeed]] = Field(default_factory=list)
+    # Retain historical inventories verbatim; current workflows do not generate them.
+    source_support_needs: SkipJsonSchema[list[dict[str, Any]]] = Field(default_factory=list)
+    support_needs: SkipJsonSchema[list[dict[str, Any]]] = Field(default_factory=list)
     rails: list[Rail] = Field(default_factory=list)
     interfaces: list[Interface] = Field(default_factory=list)
     signal_checks: list[SignalCheck] = Field(default_factory=list)
@@ -442,17 +399,20 @@ class DesignRun(Record):
     usage: Usage = Field(default_factory=Usage)
     limits: Limits = Field(default_factory=Limits)
 
-    @field_validator("compatibility", mode="before")
-    @classmethod
-    def read_legacy_compatibility(cls, value):
-        # Historical incomplete records are not retroactively approved.
-        return None if value == "incomplete" else value
-
     def invalidate_review(self) -> None:
         """Any design change needs a fresh whole-BOM review."""
         self.review_completed = False
         self.findings = []
         self.compatibility = None
+
+    def invalidate_configuration(self) -> None:
+        """Rebuild operating records after changing parts or source-number identities."""
+        self.rails = []
+        self.interfaces = []
+        self.signal_checks = []
+        self.regulator_checks = []
+        self.configuration_notes = []
+        self.invalidate_review()
 
 
 class Plan(Record):
