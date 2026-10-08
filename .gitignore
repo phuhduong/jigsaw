@@ -1,35 +1,41 @@
-# IDE
-.vscode/
-.idea/
-
-# Claude / Cursor local settings
-.claude/
-.cursor/
-CLAUDE.md
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Logs
-*.log
-logs/
-
-# Dependencies
-node_modules/
-
-# Environment variables
+# Local credentials and settings
 .env
 *.env
 .env.*
 !.env.example
 !.env.template
+.idea/
+.vscode/
 
-# Local design previews, screenshots, and QA records
-/output/
-
-# Local backend runtime and Python environment
-backend/data/
-backend/.venv/
+# Dependencies and Python environments
+node_modules/
+.venv/
+venv/
+env/
 __pycache__/
 *.py[cod]
+/frontend/.yarn/cache/
+/frontend/.yarn/unplugged/
+/frontend/.yarn/build-state.yml
+/frontend/.yarn/install-state.gz
+.pnp.*
+
+# Generated builds and tool caches
+build/
+dist/
+.react-router/
+.vite/
+*.tsbuildinfo
+.cache/
+.ruff_cache/
+coverage/
+
+# Saved designs, source caches, and local verification artifacts
+/backend/data/
+/output/
+
+# Logs and operating-system files
+*.log
+logs/
+.DS_Store
+Thumbs.db
