@@ -14,9 +14,7 @@ export const getInterfaceNodeId = (id: string) => `interface:${id}`;
 
 /** The map is a view of recorded relationships, never a wiring inference. */
 export function buildSystemMap(snapshot: DesignSnapshot) {
-  const rails = snapshot.rails ?? [];
-  const interfaces = snapshot.interfaces ?? [];
-  const needs = snapshot.support_needs ?? [];
+  const { rails, interfaces, support_needs } = snapshot;
   const byId = new Map(snapshot.components.map((part) => [part.id, part]));
   const functionalIds = new Set([
     ...rails.map((rail) => rail.source_component_id),
@@ -35,13 +33,13 @@ export function buildSystemMap(snapshot: DesignSnapshot) {
     snapshot.components.map((part) => [
       part.id,
       new Set(
-        (part.support_for ?? []).filter(
+        part.support_for.filter(
           (id) => id !== part.id && supportParents.has(id),
         ),
       ),
     ]),
   );
-  for (const need of needs) {
+  for (const need of support_needs) {
     for (const id of need.component_ids) {
       for (const parent of need.parent_ids) {
         if (id !== parent) parentIds.get(id)?.add(parent);

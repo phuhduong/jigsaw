@@ -315,7 +315,7 @@ export async function streamRun(
 ): Promise<void> {
   if (API_CONFIG.generationDisabled)
     throw new Error(
-      "Demo mode is enabled. Live design generation is unavailable in this mode.",
+      "Design generation is disabled. Saved designs are still available.",
     );
   const controller = new AbortController();
   const handleAbort = () => controller.abort();

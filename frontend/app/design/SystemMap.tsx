@@ -18,8 +18,7 @@ import {
   type ComponentPosition,
 } from "./systemLayout.ts";
 import {
-  getCurrentFindings,
-  isBlockingFinding,
+  getCompatibilityFailures,
   isSelectedProduct,
   getSubjectComponentIds,
 } from "./reportHelpers";
@@ -54,15 +53,11 @@ export default function SystemMap({ snapshot, selectedId, onSelect }: Props) {
     traceId,
     ...tracedPaths.flatMap((path) => path.componentIds),
   ]);
-  const rails = snapshot.rails ?? [];
-  const interfaces = snapshot.interfaces ?? [];
+  const { rails, interfaces } = snapshot;
   const unresolvedNeeds = snapshot.support_needs.filter(
     (need) => need.status === "unresolved",
   );
-  const failedChecks =
-    snapshot.lifecycle === "running"
-      ? []
-      : getCurrentFindings(snapshot).filter(isBlockingFinding);
+  const failedChecks = getCompatibilityFailures(snapshot);
 
   // Only measure the viewport. Node positions and paths share one coordinate
   // system; opening the inspector never changes their arrangement or zoom.
@@ -227,7 +222,7 @@ export default function SystemMap({ snapshot, selectedId, onSelect }: Props) {
             <div className="system-map-legend" aria-label="Relationship types">
               {rails.length > 0 && (
                 <span>
-                  <i className="system-legend-power" />
+                  <i />
                   Power
                 </span>
               )}
@@ -327,11 +322,7 @@ export default function SystemMap({ snapshot, selectedId, onSelect }: Props) {
                             <path
                               key={index}
                               className="system-arrow"
-                              d={
-                                endpoint.side === "left"
-                                  ? `M ${endpoint.x - 5} ${endpoint.y - 3} L ${endpoint.x} ${endpoint.y} L ${endpoint.x - 5} ${endpoint.y + 3}`
-                                  : `M ${endpoint.x + 5} ${endpoint.y - 3} L ${endpoint.x} ${endpoint.y} L ${endpoint.x + 5} ${endpoint.y + 3}`
-                              }
+                              d={`M ${endpoint.x - 5} ${endpoint.y - 3} L ${endpoint.x} ${endpoint.y} L ${endpoint.x - 5} ${endpoint.y + 3}`}
                             />
                           ) : (
                             <circle
@@ -460,7 +451,7 @@ export default function SystemMap({ snapshot, selectedId, onSelect }: Props) {
       )}
 
       <ul
-        className="system-accessible-connections"
+        className="sr-only"
         aria-label="Recorded relationships"
       >
         {rails.map((rail) => (

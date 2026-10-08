@@ -1,38 +1,35 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { Component, Finding } from "../app/services/api/designRunApi.ts";
+import type { Finding } from "../app/services/api/designRunApi.ts";
 import {
   formatMoney,
-  getCurrentFindings,
+  getCompatibilityFailures,
   getSubjectComponentIds,
-  isBlockingFinding,
   isSelectedProduct,
 } from "../app/design/reportHelpers.ts";
-import { savedRun } from "./fixtures/designRun.ts";
+import { createPart, savedRun } from "./fixtures/designRun.ts";
 
 test("review shows only this revision's findings and never revives discarded source errors", () => {
   const finding: Finding = {
     id: "current",
     revision: 2,
-    area: "evidence",
+    area: "power",
     method: "model_review",
-    kind: "guidance",
-    status: "unknown",
+    kind: "check",
+    status: "fail",
     subject_ids: ["U1"],
     evidence_ids: [],
     document_id: null,
-    explanation: "An unused observation was discarded.",
+    explanation: "Supply exceeds the operating range.",
     remedy: "",
   };
   const old: Finding = {
     ...finding,
     id: "old",
     revision: 1,
-    kind: "check",
-    status: "fail",
   };
   assert.deepEqual(
-    getCurrentFindings({
+    getCompatibilityFailures({
       ...savedRun,
       revision: 2,
       findings: [old, finding],
@@ -42,7 +39,7 @@ test("review shows only this revision's findings and never revives discarded sou
   );
 });
 
-test("only explicit functional or electrical failures affect the verdict", () => {
+test("reports show explicit current failures, keeping diagnostics and active reviews quiet", () => {
   const failure: Finding = {
     id: "power",
     revision: 1,
@@ -56,36 +53,26 @@ test("only explicit functional or electrical failures affect the verdict", () =>
     explanation: "Supply exceeds the operating range.",
     remedy: "Select a compatible supply.",
   };
-  assert.equal(isBlockingFinding(failure), true);
-  for (const note of [
-    { ...failure, status: "unknown" as const },
-    { ...failure, area: "evidence" as const },
-    { ...failure, kind: "guidance" as const },
-  ]) {
-    assert.equal(isBlockingFinding(note), false);
-  }
+  const snapshot = {
+    ...savedRun,
+    findings: [
+      failure,
+      { ...failure, status: "unknown" as const },
+      { ...failure, area: "evidence" as const },
+      { ...failure, kind: "guidance" as const },
+    ],
+  };
+  assert.deepEqual(getCompatibilityFailures(snapshot), [failure]);
+  assert.deepEqual(
+    getCompatibilityFailures({ ...snapshot, lifecycle: "running" }),
+    [],
+  );
 });
 
 test("shared support links retain both source parents and fulfillment placements", () => {
-  const createComponent = (id: string): Component => ({
-    id,
-    name: id,
-    purpose: "Fixture",
-    kind: "passive",
-    support_for: [],
-    selection_reason: "",
-    selection_error: null,
-    product: null,
-    document_ids: [],
-    document_errors: [],
-  });
   const snapshot = {
     ...savedRun,
-    components: [
-      createComponent("U1"),
-      createComponent("U2"),
-      createComponent("R1"),
-    ],
+    components: [createPart("U1"), createPart("U2"), createPart("R1")],
     interfaces: [
       {
         id: "I2C",

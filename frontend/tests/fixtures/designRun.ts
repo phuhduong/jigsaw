@@ -1,4 +1,8 @@
-import type { DesignSnapshot } from "../../app/services/api/designRunApi.ts";
+import type {
+  Component,
+  DesignSnapshot,
+  Rail,
+} from "../../app/services/api/designRunApi.ts";
 
 export const savedRun: DesignSnapshot = {
   id: "11111111111111111111111111111111",
@@ -46,3 +50,43 @@ export const savedRun: DesignSnapshot = {
   },
   bom: [],
 };
+
+export function createPart(id: string, supportFor: string[] = []): Component {
+  return {
+    id,
+    name: id,
+    kind: "active",
+    purpose: "Fixture part",
+    support_for: supportFor,
+    selection_reason: "",
+    selection_error: null,
+    document_ids: [],
+    document_errors: [],
+    product: {
+      mpn: "same-part",
+      manufacturer: "Fixture",
+      package: null,
+      description: "",
+      datasheet_url: null,
+      product_url: null,
+      parameters: [],
+      retrieved_at: savedRun.created_at,
+    },
+  };
+}
+
+export const createRail = (id: string, source: string, loads: string[]): Rail => ({
+  id,
+  source_component_id: source,
+  description: "Fixture supply",
+  voltage_min: null,
+  voltage_max: null,
+  available_current: null,
+  evidence_ids: [],
+  loads: loads.map((component_id) => ({
+    component_id,
+    voltage_min: null,
+    voltage_max: null,
+    current: null,
+  })),
+});

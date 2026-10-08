@@ -4,17 +4,6 @@
   min-width: 0;
   color: var(--ink);
 }
-.report-sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
-}
 .report-empty {
   padding: 36px 0;
   font-size: 15px;
@@ -155,6 +144,14 @@
   line-height: 1.55;
   overflow-wrap: anywhere;
 }
+.bom-ordering-note,
+.component-ordering-note {
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
 .bom-quantity {
   font-variant-numeric: tabular-nums;
   width: 10%;
@@ -201,11 +198,18 @@
   font-size: 12px;
 }
 .bom-footer {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto auto;
   justify-content: flex-end;
   align-items: baseline;
-  gap: 24px;
+  gap: 6px 24px;
   padding: 18px 0 20px;
+}
+.bom-total-note {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: right;
 }
 .bom-footer > span {
   font-size: 13px;
@@ -614,7 +618,7 @@
   }
   .bom-footer {
     justify-content: space-between;
-    gap: 15px;
+    gap: 6px 15px;
     padding: 20px 0;
   }
   .bom-footer strong {

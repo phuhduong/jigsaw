@@ -1,5 +1,4 @@
 import { useLocation } from "react-router";
-import { useMemo } from "react";
 import DesignPage from "../design/index";
 import type { InitialRequest } from "../services/api/designRunApi";
 
@@ -16,16 +15,8 @@ export function meta() {
 
 export default function DesignRoute() {
   const location = useLocation();
-  const initialRequest = useMemo(() => {
-    const state = location.state as {
-      request?: InitialRequest;
-      query?: string;
-    } | null;
-    return (
-      state?.request ?? (state?.query ? { query: state.query } : undefined)
-    );
-  }, [location.state]);
+  const state = location.state as { request?: InitialRequest } | null;
   const runId = new URLSearchParams(location.search).get("run");
 
-  return <DesignPage initialRequest={initialRequest} runId={runId} />;
+  return <DesignPage initialRequest={state?.request} runId={runId} />;
 }

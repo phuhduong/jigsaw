@@ -1,43 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type {
-  Component,
-  Interface,
-  Rail,
-} from "../app/services/api/designRunApi.ts";
+import type { Interface } from "../app/services/api/designRunApi.ts";
 import {
   createSystemLayout,
   fitSystemLayout,
 } from "../app/design/systemLayout.ts";
-import { savedRun } from "./fixtures/designRun.ts";
-
-const createPart = (id: string): Component => ({
-  id,
-  name: id,
-  kind: "active",
-  purpose: "Fixture part",
-  support_for: [],
-  selection_reason: "",
-  selection_error: null,
-  product: null,
-  document_ids: [],
-  document_errors: [],
-});
-const createRail = (id: string, source: string, loads: string[]): Rail => ({
-  id,
-  source_component_id: source,
-  description: "Fixture supply",
-  voltage_min: null,
-  voltage_max: null,
-  available_current: null,
-  evidence_ids: [],
-  loads: loads.map((component_id) => ({
-    component_id,
-    voltage_min: null,
-    voltage_max: null,
-    current: null,
-  })),
-});
+import { createPart, createRail, savedRun } from "./fixtures/designRun.ts";
 const createInterface = (id: string, endpoints: string[]): Interface => ({
   id,
   protocol: "I2C",
@@ -113,7 +81,7 @@ function assertClearRoutes(layout: ReturnType<typeof createSystemLayout>) {
       assert.ok(node, `${path.id} references a missing node`);
       assert.equal(
         endpoint.x,
-        endpoint.side === "left" ? node.x : node.x + node.width,
+        endpoint.kind === "target" ? node.x : node.x + node.width,
       );
       assert.ok(endpoint.y > node.y && endpoint.y < node.y + node.height);
     }
@@ -123,7 +91,7 @@ function assertClearRoutes(layout: ReturnType<typeof createSystemLayout>) {
 test("power branches and a same-column bus preserve recorded relationships without crossing parts", () => {
   const layout = createSystemLayout({
     ...savedRun,
-    components: ["U1", "U2", "J1", "U3"].map(createPart),
+    components: ["U1", "U2", "J1", "U3"].map((id) => createPart(id)),
     rails: [
       createRail("5V", "J1", ["U3"]),
       createRail("3V3", "U3", ["U1", "U2"]),
@@ -134,31 +102,31 @@ test("power branches and a same-column bus preserve recorded relationships witho
     new Set(layout.components.map((node) => node.id)),
     new Set(["U1", "U2", "J1", "U3"]),
   );
-  assert.deepEqual(layout.paths.map((path) => path.relationId).sort(), [
+  assert.deepEqual(layout.paths.map((path) => path.id).sort(), [
     "bus:SENSORS",
     "rail:3V3",
     "rail:5V",
   ]);
-  const input = layout.paths.find((path) => path.relationId === "rail:5V")!;
+  const input = layout.paths.find((path) => path.id === "rail:5V")!;
   assert.equal(
     input.endpoints[0].y,
     input.endpoints[1].y,
     "one input and one output should remain aligned",
   );
-  const power = layout.paths.find((path) => path.relationId === "rail:3V3")!;
+  const power = layout.paths.find((path) => path.id === "rail:3V3")!;
   assert.deepEqual(
-    power.endpoints.map(({ nodeId, kind, side }) => [nodeId, kind, side]),
+    power.endpoints.map(({ nodeId, kind }) => [nodeId, kind]),
     [
-      ["U3", "source", "right"],
-      ["U1", "target", "left"],
-      ["U2", "target", "left"],
+      ["U3", "source"],
+      ["U1", "target"],
+      ["U2", "target"],
     ],
   );
   const data = layout.paths.find((path) => path.kind === "interface")!;
   assert.equal(data.label?.text, "I2C");
   assert.ok(
     data.endpoints.every(
-      (endpoint) => endpoint.kind === "data" && endpoint.side === "right",
+      (endpoint) => endpoint.kind === "data",
     ),
   );
   const ys = data.endpoints.map((endpoint) => endpoint.y);
@@ -176,7 +144,7 @@ test("power branches and a same-column bus preserve recorded relationships witho
 test("long regulator chains and rails skipping columns retain separate clear routes", () => {
   const layout = createSystemLayout({
     ...savedRun,
-    components: ["E", "D", "C", "B", "A"].map(createPart),
+    components: ["E", "D", "C", "B", "A"].map((id) => createPart(id)),
     rails: [
       createRail("AB", "A", ["B"]),
       createRail("BC", "B", ["C", "E"]),
@@ -220,7 +188,7 @@ test("external supplies and external interface endpoints connect through clear c
   assertClearRoutes(parallelLoads);
   const layout = createSystemLayout({
     ...savedRun,
-    components: ["A", "B", "C"].map(createPart),
+    components: ["A", "B", "C"].map((id) => createPart(id)),
     rails: [
       createRail("VIN", "external", ["A", "C"]),
       createRail("VOUT", "A", ["B"]),
@@ -235,11 +203,11 @@ test("external supplies and external interface endpoints connect through clear c
   const externalInterface = layout.externalNodes.find(
     (node) => node.kind === "interface",
   )!;
-  assert.equal(supply.railId, "VIN");
-  assert.equal(externalInterface.interfaceId, "CONTROL");
+  assert.equal(supply.id, "rail:VIN");
+  assert.equal(externalInterface.id, "interface:CONTROL");
   assert.ok(
     layout.paths
-      .find((path) => path.relationId === "rail:VIN")!
+      .find((path) => path.id === "rail:VIN")!
       .endpoints.some(
         (endpoint) =>
           endpoint.nodeId === supply.id && endpoint.kind === "source",
@@ -247,7 +215,7 @@ test("external supplies and external interface endpoints connect through clear c
   );
   assert.ok(
     layout.paths
-      .find((path) => path.relationId === "bus:CONTROL")!
+      .find((path) => path.id === "bus:CONTROL")!
       .endpoints.some(
         (endpoint) =>
           endpoint.nodeId === externalInterface.id && endpoint.kind === "data",
@@ -259,7 +227,7 @@ test("external supplies and external interface endpoints connect through clear c
 test("missing references never invent nodes or power paths", () => {
   const layout = createSystemLayout({
     ...savedRun,
-    components: ["A", "B"].map(createPart),
+    components: ["A", "B"].map((id) => createPart(id)),
     rails: [
       createRail("NO_SOURCE", "missing", ["A"]),
       createRail("NO_LOAD", "A", ["missing"]),
@@ -269,7 +237,7 @@ test("missing references never invent nodes or power paths", () => {
   assert.deepEqual(layout.components.map((node) => node.id).sort(), ["A", "B"]);
   assert.deepEqual(layout.externalNodes, []);
   assert.deepEqual(
-    layout.paths.map((path) => path.relationId),
+    layout.paths.map((path) => path.id),
     ["bus:CONTROL"],
   );
   assert.deepEqual(new Set(layout.paths[0].componentIds), new Set(["A", "B"]));

@@ -13,17 +13,14 @@ export function formatMoney(value: number | null, currency: string): string {
   return `${currency} ${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 })}`;
 }
 
-export function getCurrentFindings(snapshot: DesignSnapshot): Finding[] {
+export function getCompatibilityFailures(snapshot: DesignSnapshot): Finding[] {
+  if (snapshot.lifecycle === "running") return [];
   return snapshot.findings.filter(
-    (finding) => finding.revision === snapshot.revision,
-  );
-}
-
-export function isBlockingFinding(finding: Finding): boolean {
-  return (
-    finding.kind === "check" &&
-    finding.status === "fail" &&
-    finding.area !== "evidence"
+    (finding) =>
+      finding.revision === snapshot.revision &&
+      finding.kind === "check" &&
+      finding.status === "fail" &&
+      finding.area !== "evidence",
   );
 }
 

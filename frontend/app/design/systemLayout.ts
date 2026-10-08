@@ -17,17 +17,13 @@ export interface ComponentPosition extends Point {
 interface ExternalPosition extends ComponentPosition {
   kind: "supply" | "interface";
   label: string;
-  railId?: string;
-  interfaceId?: string;
 }
 interface LayoutEndpoint extends Point {
   nodeId: string;
-  side: "left" | "right";
   kind: "source" | "target" | "data";
 }
 interface LayoutPath {
   id: string;
-  relationId: string;
   kind: "power" | "interface";
   componentIds: string[];
   d: string;
@@ -163,8 +159,7 @@ function addSpineSegments(
 /** A fixed architecture plane: resizing scrolls the map, never changes its topology. */
 export function createSystemLayout(snapshot: DesignSnapshot): SystemLayout {
   const map = buildSystemMap(snapshot);
-  const rails = snapshot.rails ?? [];
-  const interfaces = snapshot.interfaces ?? [];
+  const { rails, interfaces } = snapshot;
   const externalInterfaces = interfaces.filter((bus) =>
     bus.endpoints.some((endpoint) => endpoint.component_id === "external"),
   );
@@ -240,7 +235,6 @@ export function createSystemLayout(snapshot: DesignSnapshot): SystemLayout {
     externalNodes.push({
       id,
       kind: "supply",
-      railId: rail.id,
       label:
         map.externalRails.length > 1
           ? `External supply ${index + 1}`
@@ -258,7 +252,6 @@ export function createSystemLayout(snapshot: DesignSnapshot): SystemLayout {
     externalNodes.push({
       id,
       kind: "interface",
-      interfaceId: bus.id,
       label: "External interface",
       x: getColumnX(column) + 52,
       y: getRowY(index, externalInterfaces.length) + 63,
@@ -317,12 +310,10 @@ export function createSystemLayout(snapshot: DesignSnapshot): SystemLayout {
         ? (relations.indexOf(relationId) / (relations.length - 1) - 0.5) *
           Math.min(24, (relations.length - 1) * 12)
         : 0;
-    const side = kind === "target" ? "left" : "right";
     return {
       nodeId,
       kind,
-      side,
-      x: node.x + (side === "right" ? node.width : 0),
+      x: node.x + (kind === "target" ? 0 : node.width),
       y:
         node.y +
         (coreIds.has(nodeId) ? (kind === "data" ? 124 : 80) : node.height / 2) +
@@ -403,7 +394,6 @@ export function createSystemLayout(snapshot: DesignSnapshot): SystemLayout {
     addPath(
       {
         id: relationId,
-        relationId,
         kind: "power",
         componentIds: [sourceId, ...targets].filter((id) => coreIds.has(id)),
         endpoints,
@@ -469,7 +459,6 @@ export function createSystemLayout(snapshot: DesignSnapshot): SystemLayout {
     addPath(
       {
         id: relationId,
-        relationId,
         kind: "interface",
         componentIds: ids.filter((id) => coreIds.has(id)),
         endpoints,

@@ -1,6 +1,6 @@
 {
   "buildCommand": "yarn build",
-  "installCommand": "yarn install",
+  "installCommand": "yarn install --immutable",
   "outputDirectory": "build/client",
   "framework": null,
   "rewrites": [

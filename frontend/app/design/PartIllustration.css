@@ -1,4 +1,4 @@
-.technical-part {
+.part-illustration {
   --technical-accent: #95949b;
   display: block;
   width: 100%;
@@ -10,13 +10,13 @@
   stroke-linecap: round;
   stroke-linejoin: round;
 }
-.technical-part.part-illustration-controller {
+.part-illustration-controller {
   --technical-accent: #948aaa;
 }
-.technical-part.part-illustration-sensor {
+.part-illustration-sensor {
   --technical-accent: #80a0b4;
 }
-.technical-part.part-illustration-power {
+.part-illustration-power {
   --technical-accent: #81a08b;
 }
 .technical-top {

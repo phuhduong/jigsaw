@@ -1,9 +1,8 @@
 import type { DesignSnapshot, Finding } from "../services/api/designRunApi";
 import { getComponentTitle } from "./componentPresentation";
 import {
-  getCurrentFindings,
+  getCompatibilityFailures,
   getSubjectComponentIds,
-  isBlockingFinding,
   isSelectedProduct,
 } from "./reportHelpers";
 import "./report.css";
@@ -72,10 +71,7 @@ export function CompatibilityIssue({
 }
 
 export default function ReviewPanel({ snapshot, onSelect }: ReportProps) {
-  const failures =
-    snapshot.lifecycle === "running"
-      ? []
-      : getCurrentFindings(snapshot).filter(isBlockingFinding);
+  const failures = getCompatibilityFailures(snapshot);
   const supportIds = [
     ...new Set(
       [...snapshot.source_support_needs, ...snapshot.support_needs].map(

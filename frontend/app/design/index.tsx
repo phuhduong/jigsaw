@@ -27,7 +27,7 @@ import SystemMap from "./SystemMap";
 import PartsList from "./PartsList";
 import ReviewPanel from "./ReviewPanel";
 import ComponentDetail from "./ComponentDetail";
-import { getCurrentFindings, isBlockingFinding } from "./reportHelpers";
+import { getCompatibilityFailures } from "./reportHelpers";
 import { getRunStopMessage } from "./runFeedback";
 import PartIllustration from "./PartIllustration";
 
@@ -258,9 +258,7 @@ export default function DesignPage({
   )
     ? selectedId
     : null;
-  const findings = snapshot ? getCurrentFindings(snapshot) : [];
-  const blockingFindings =
-    snapshot?.lifecycle === "running" ? [] : findings.filter(isBlockingFinding);
+  const blockingFindings = snapshot ? getCompatibilityFailures(snapshot) : [];
   const disabled =
     busy || snapshot?.lifecycle === "running" || API_CONFIG.generationDisabled;
   const isReviewing = streaming || snapshot?.lifecycle === "running";
@@ -395,6 +393,22 @@ export default function DesignPage({
   };
   const hasWorkspace = Boolean(snapshot || runId || busy);
   const isRestoring = loading || Boolean(runId && !streaming);
+  const inspector = snapshot && selectedComponentId && (
+    <div
+      className={view === "system" ? "selection-inspector" : "bom-inspector"}
+      ref={inspectorRef}
+      tabIndex={-1}
+      aria-label="Component details"
+      onKeyDown={handleInspectorKeyDown}
+    >
+      <ComponentDetail
+        snapshot={snapshot}
+        componentId={selectedComponentId}
+        onSelect={handleSelectComponent}
+        onClose={handleCloseInspector}
+      />
+    </div>
+  );
 
   return (
     <div className="app-shell">
@@ -670,22 +684,7 @@ export default function DesignPage({
                           onSelect={handleSelectComponent}
                         />
                       </div>
-                      {selectedComponentId && (
-                        <div
-                          className="selection-inspector"
-                          ref={inspectorRef}
-                          tabIndex={-1}
-                          aria-label="Component details"
-                          onKeyDown={handleInspectorKeyDown}
-                        >
-                          <ComponentDetail
-                            snapshot={snapshot}
-                            componentId={selectedComponentId}
-                            onSelect={handleSelectComponent}
-                            onClose={handleCloseInspector}
-                          />
-                        </div>
-                      )}
+                      {inspector}
                     </div>
                   )}
                 </section>
@@ -703,22 +702,7 @@ export default function DesignPage({
                         selectedId={selectedComponentId}
                         onSelect={handleSelectComponent}
                       />
-                      {selectedComponentId && (
-                        <div
-                          className="bom-inspector"
-                          ref={inspectorRef}
-                          tabIndex={-1}
-                          aria-label="Component details"
-                          onKeyDown={handleInspectorKeyDown}
-                        >
-                          <ComponentDetail
-                            snapshot={snapshot}
-                            componentId={selectedComponentId}
-                            onSelect={handleSelectComponent}
-                            onClose={handleCloseInspector}
-                          />
-                        </div>
-                      )}
+                      {inspector}
                     </>
                   )}
                 </section>

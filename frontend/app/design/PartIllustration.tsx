@@ -28,7 +28,7 @@ function Block({
   const y2 = y + depth;
   const top = z + height;
   return (
-    <g className={board ? "technical-board" : "technical-package"}>
+    <g className={board ? "technical-board" : undefined}>
       <polygon
         className="technical-front"
         points={[
@@ -72,7 +72,7 @@ export default function PartIllustration({
 }) {
   return (
     <svg
-      className={`part-illustration part-illustration-${role} technical-part`}
+      className={`part-illustration part-illustration-${role}`}
       viewBox="42 21 161 104"
       aria-hidden="true"
       focusable="false"

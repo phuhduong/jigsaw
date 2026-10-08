@@ -1,56 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type {
-  Component,
-  DesignSnapshot,
-  Rail,
-} from "../app/services/api/designRunApi.ts";
+import type { DesignSnapshot } from "../app/services/api/designRunApi.ts";
 import { buildSystemMap } from "../app/design/systemRelationships.ts";
 import { createSystemLayout } from "../app/design/systemLayout.ts";
 import {
   getComponentRole,
   getComponentTitle,
 } from "../app/design/componentPresentation.ts";
-import { savedRun } from "./fixtures/designRun.ts";
-
-function createPart(id: string, supportFor: string[] = []): Component {
-  return {
-    id,
-    name: id,
-    kind: "active",
-    purpose: "Fixture part",
-    support_for: supportFor,
-    selection_reason: "",
-    selection_error: null,
-    document_ids: [],
-    document_errors: [],
-    product: {
-      mpn: "same-part",
-      manufacturer: "Fixture",
-      package: null,
-      description: "",
-      datasheet_url: null,
-      product_url: null,
-      parameters: [],
-      retrieved_at: "2026-09-29T12:00:00Z",
-    },
-  };
-}
-const createRail = (id: string, source: string, loads: string[]): Rail => ({
-  id,
-  source_component_id: source,
-  description: "Fixture supply",
-  voltage_min: null,
-  voltage_max: null,
-  available_current: null,
-  evidence_ids: [],
-  loads: loads.map((component_id) => ({
-    component_id,
-    voltage_min: null,
-    voltage_max: null,
-    current: null,
-  })),
-});
+import { createPart, createRail, savedRun } from "./fixtures/designRun.ts";
 
 test("concise titles distinguish a component's function from the parts it serves", () => {
   const controller = {

@@ -2,7 +2,7 @@
 
 interface ImportMetaEnv {
   readonly VITE_BACKEND_URL?: string;
-  readonly VITE_USE_MOCK?: string;
+  readonly VITE_DISABLE_GENERATION?: string;
 }
 
 interface ImportMeta {

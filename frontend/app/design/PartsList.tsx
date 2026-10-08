@@ -4,9 +4,8 @@ import { getComponentRole, getComponentTitle } from "./componentPresentation";
 import PartIllustration from "./PartIllustration";
 import {
   formatMoney,
-  getCurrentFindings,
+  getCompatibilityFailures,
   getSubjectComponentIds,
-  isBlockingFinding,
   isSelectedProduct,
 } from "./reportHelpers";
 import "./report.css";
@@ -36,15 +35,9 @@ export default function PartsList({
   );
   const isRunning = snapshot.lifecycle === "running";
   const failedComponentIds = new Set(
-    isRunning
-      ? []
-      : getCurrentFindings(snapshot)
-          .filter(isBlockingFinding)
-          .flatMap((finding) =>
-            finding.subject_ids.flatMap((id) =>
-              getSubjectComponentIds(snapshot, id),
-            ),
-          ),
+    getCompatibilityFailures(snapshot).flatMap((finding) =>
+      finding.subject_ids.flatMap((id) => getSubjectComponentIds(snapshot, id)),
+    ),
   );
   return (
     <section className="parts-panel" aria-label="Parts list">
@@ -61,10 +54,10 @@ export default function PartsList({
           aria-label="Parts table"
         >
           <table className="bom-table" role="table">
-            <caption className="report-sr-only">
+            <caption className="sr-only">
               Parts for {snapshot.options.board_quantity}{" "}
               {snapshot.options.board_quantity === 1 ? "board" : "boards"}.
-              Price is the total for the order quantity.
+              Prices cover the order quantity.
             </caption>
             <thead role="rowgroup">
               <tr role="row">
@@ -135,7 +128,7 @@ export default function PartsList({
                             {hasIssue && (
                               <span className="bom-issue">
                                 <CircleAlert size={14} aria-hidden="true" />
-                                <span className="report-sr-only">
+                                <span className="sr-only">
                                   Compatibility issue
                                 </span>
                               </span>
@@ -144,6 +137,9 @@ export default function PartsList({
                           <span className="bom-identity">{row.mpn}</span>
                         </span>
                       </button>
+                      {row.ordering_note && (
+                        <p className="bom-ordering-note">{row.ordering_note}</p>
+                      )}
                     </td>
                     <td role="cell" className="bom-quantity">
                       <span className="bom-mobile-label" aria-hidden="true">
@@ -241,8 +237,8 @@ export default function PartsList({
         <footer className="bom-footer">
           <span>
             {hasUnpricedRows || unselectedComponents.length > 0
-              ? "Partial total"
-              : "Total"}
+              ? "Partial parts subtotal"
+              : "Parts subtotal"}
           </span>
           <div>
             {[...totalsByCurrency].map(([currency, total]) => (
@@ -250,6 +246,9 @@ export default function PartsList({
             ))}
             {totalsByCurrency.size === 0 && <strong>Not quoted</strong>}
           </div>
+          <p className="bom-total-note">
+            Shipping, tax, and unquoted fees are excluded.
+          </p>
         </footer>
       )}
     </section>

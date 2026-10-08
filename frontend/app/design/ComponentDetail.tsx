@@ -6,9 +6,8 @@ import { getComponentRole, getComponentTitle } from "./componentPresentation";
 import PartIllustration from "./PartIllustration";
 import {
   formatMoney,
-  getCurrentFindings,
+  getCompatibilityFailures,
   getSubjectComponentIds,
-  isBlockingFinding,
   isSelectedProduct,
 } from "./reportHelpers";
 import "./report.css";
@@ -32,15 +31,11 @@ export default function ComponentDetail({
     item.reference_ids.includes(componentId),
   );
   const isRunning = snapshot.lifecycle === "running";
-  const failures = isRunning
-    ? []
-    : getCurrentFindings(snapshot).filter(
-        (finding) =>
-          isBlockingFinding(finding) &&
-          finding.subject_ids.some((id) =>
-            getSubjectComponentIds(snapshot, id).includes(componentId),
-          ),
-      );
+  const failures = getCompatibilityFailures(snapshot).filter((finding) =>
+    finding.subject_ids.some((id) =>
+      getSubjectComponentIds(snapshot, id).includes(componentId),
+    ),
+  );
   const purchaseUrl = getSafeUrl(row?.purchase_url || product?.product_url);
   const datasheetUrl = getSafeUrl(product?.datasheet_url || row?.datasheet_url);
   const title = getComponentTitle(component);
@@ -115,6 +110,9 @@ export default function ComponentDetail({
                 </p>
               )}
             </div>
+          )}
+          {row?.ordering_note && (
+            <p className="component-ordering-note">{row.ordering_note}</p>
           )}
           {(purchaseUrl || datasheetUrl) && (
             <div className="component-links">

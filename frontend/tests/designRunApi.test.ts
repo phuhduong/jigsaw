@@ -7,6 +7,7 @@ import {
   streamRun,
 } from "../app/services/api/designRunApi.ts";
 import type { RunEvent } from "../app/services/api/designRunApi.ts";
+import { API_CONFIG } from "../app/services/api/config.ts";
 import { savedRun } from "./fixtures/designRun.ts";
 
 function createEventResponse(events: RunEvent[]) {
@@ -158,6 +159,24 @@ test("restoration uses GET and exports the saved run ID", async (t) => {
     getExportUrl(savedRun.id, "json"),
     `http://localhost:3001/api/runs/${savedRun.id}/export?format=json`,
   );
+});
+
+test("disabling generation keeps saved designs available without submitting a POST", async (t) => {
+  const previous = API_CONFIG.generationDisabled;
+  t.after(() => {
+    API_CONFIG.generationDisabled = previous;
+  });
+  API_CONFIG.generationDisabled = true;
+  const fetchMock = t.mock.method(globalThis, "fetch", async () =>
+    Response.json(savedRun),
+  );
+  await assert.rejects(
+    streamRun({ query: "sensor" }, () => {}),
+    /Design generation is disabled/,
+  );
+  assert.equal(fetchMock.mock.callCount(), 0);
+  assert.deepEqual(await getSavedRun(savedRun.id), savedRun);
+  assert.equal(fetchMock.mock.callCount(), 1);
 });
 
 test("saved review outcomes preserve nonblocking details without changing the result", async (t) => {
